@@ -1,19 +1,333 @@
+import traceback
+
 from .read import SongsReader, BeatmapsetReader, BeatmapReader
-from .util import search_for_songs_folder
+from .util import search_for_songs_folder, get_sample_set
+from .enums import *
 from typing import Sequence
+import os
+
+
+class HitObject:
+    def __new__(cls, data):
+        # TODO: hit sound and hit sample objects
+        data = data.split(",")
+        x, y = int(data[0]), int(data[1])
+        time = int(data[2])
+        type = int(data[3])
+        new_combo = bool(type & (1 << 2))
+        combo_colour_skip = 0 if not new_combo else type & 0b01110000
+        hit_sound = int(data[4]) if data[4] else None  # Got an error where the hit sound was missing :shrug:
+        params = data[5:]
+        hit_sample = params.pop(-1) if params and ":" in params[-1] else None
+        if type & (1 << 0):
+            return HitCircle(params, x, y, time, new_combo, combo_colour_skip,
+                             hit_sound, hit_sample)
+        elif type & (1 << 1):
+            return Slider(params, x, y, time, new_combo, combo_colour_skip,
+                          hit_sound, hit_sample)
+        elif type & (1 << 3):
+            return Spinner(params, x, y, time, new_combo, combo_colour_skip,
+                           hit_sound, hit_sample)
+        elif type & (1 << 7):
+            return ManiaHoldKey(params, x, y, time, new_combo, combo_colour_skip,
+                                hit_sound, hit_sample)
+        else:
+            raise ValueError("Hit object does not have a valid type specified.")
+
+
+class HitObjectBase:
+    def __init__(self, x, y, time, new_combo, combo_colour_skip,
+                 hit_sound, hit_sample):
+        self.x = x
+        self.y = y
+        self.time = time
+        self.new_combo = new_combo
+        self.combo_colour_skip = combo_colour_skip
+        self.hit_sound = hit_sound
+        self.hit_sample = hit_sample
+
+
+class HitCircle(HitObjectBase):
+    def __init__(self, params, *args):
+        super().__init__(*args)
+
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+class Curve:
+    # TODO: Create the different curve types
+    def __init__(self, curve_data):
+        curve_data = curve_data.split("|")
+        self.type = curve_data[0]
+        self.points = list(map(
+            lambda point: Point(*tuple(map(int, point.split(":")))),
+            curve_data[1:]
+        ))
+
+
+class Slider(HitObjectBase):
+    def __init__(self, params, *args):
+        super().__init__(*args)
+        self.curve = Curve(params[0])
+        self.slides = int(params[1])
+        self.length = float(params[2])
+        # TODO: yeppers
+        self.edge_sounds = params[3] if len(params) > 3 else None
+        self.edge_sets = params[4] if len(params) > 4 else None
+
+
+class Spinner(HitObjectBase):
+    def __init__(self, params, *args):
+        super().__init__(*args)
+        self.end_time = int(params[0])
+        self.x = 256
+        self.y = 192
+
+
+class ManiaHoldKey(HitObjectBase):
+    def __init__(self, params, *args):
+        super().__init__(*args)
+        self.end_time = int(self.hit_sample.split(":")[0])
+        self.hit_sample = self.hit_sample[len(str(self.end_time))+1:]
+
+    def get_column(self, total_columns):
+        return self.x * total_columns // 512
+
+
+class General:
+    __slots__ = (
+        "audio_file", "audio_lead_in", "audio_hash", "preview_time",
+        "countdown", "sample_set", "stack_leniency", "mode",
+        "letterbox_in_breaks", "story_fire_in_front", "use_skin_sprites",
+        "always_show_playfield", "overlay_position", "skin_preference",
+        "epilepsy_warning", "special_style", "widescreen_storyboard",
+        "samples_match_playback_rate"
+    )
+
+    def __init__(self, path: str, data: dict):
+        self.audio_file = data.get("AudioFilename")
+        if self.audio_file is not None:
+            self.audio_file = os.path.join(os.path.split(path)[0], self.audio_file)
+        self.audio_lead_in = int(data.get("AudioLeadIn", 0))
+        self.audio_hash = data.get("AudioHash")
+        self.preview_time = int(data.get("PreviewTime", -1))
+        self.countdown = Countdown(int(data.get("Countdown", 1)))
+        self.sample_set = get_sample_set(data.get("SampleSet", "Normal"))
+        self.stack_leniency = float(data.get("StackLeniency", 0.7))
+        self.mode = GameMode(int(data.get("Mode", 0)))
+        self.letterbox_in_breaks = bool(data.get("LetterboxInBreaks", 0))
+        self.story_fire_in_front = bool(data.get("StoryFireInFront", 1))
+        self.use_skin_sprites = bool(data.get("UseSkinSprites", 0))
+        self.always_show_playfield = bool(data.get("AlwaysShowPlayfield", 0))
+        self.overlay_position = OverlayPosition(data.get("OverlayPosition", "NoChange"))
+        self.skin_preference = data.get("SkinPreference")
+        self.epilepsy_warning = bool(data.get("EpilepsyWarning", 0))
+        self.special_style = bool(data.get("SpecialStyle", 0))
+        self.widescreen_storyboard = bool(data.get("WidescreenStoryboard", 0))
+        self.samples_match_playback_rate = bool(data.get("SamplesMatchPlaybackRate", 0))
+
+
+class Editor:
+    __slots__ = (
+        "bookmarks", "distance_spacing", "beat_divisor",
+        "grid_size", "timeline_zoom"
+    )
+
+    def __init__(self, data: dict):
+        self.bookmarks = list(map(int, data["Bookmarks"].split(","))) if "Bookmarks" in data and data["Bookmarks"] else []
+        self.distance_spacing = float(data["DistanceSpacing"])
+        self.beat_divisor = float(data["BeatDivisor"])
+        self.grid_size = int(data["GridSize"])
+        self.timeline_zoom = float(data["TimelineZoom"]) if "TimelineZoom" in data else None
+
+
+class Metadata:
+    __slots__ = (
+        "title", "title_unicode", "artist", "artist_unicode",
+        "creator", "version", "source", "tags", "beatmap_id",
+        "beatmapset_id"
+    )
+
+    def __init__(self, data):
+        self.title = data["Title"]
+        self.title_unicode = data.get("TitleUnicode", self.title)
+        self.artist = data["Artist"]
+        self.artist_unicode = data.get("ArtistUnicode", self.artist)
+        self.creator = data["Creator"]
+        self.version = data["Version"]
+        self.source = data.get("Source")
+        self.tags = data.get("Tags")
+        self.beatmap_id = data.get("BeatmapID")
+        self.beatmapset_id = data.get("BeatmapSetID")
+
+
+class Difficulty:
+    __slots__ = (
+        "hp_drain_rate", "circle_size", "overall_difficulty",
+        "approach_rate", "slider_multiplier", "slider_tick_rate"
+    )
+
+    def __init__(self, data):
+        self.hp_drain_rate = float(data["HPDrainRate"])
+        self.circle_size = float(data["CircleSize"])
+        self.overall_difficulty = float(data["OverallDifficulty"])
+        self.approach_rate = float(data.get("ApproachRate", self.overall_difficulty))
+        self.slider_multiplier = float(data["SliderMultiplier"])
+        self.slider_tick_rate = float(data["SliderTickRate"])
+
+
+class Events:
+    pass
+
+
+class Effects:
+    def __init__(self, effects):
+        self.is_kiai_enabled = bool(effects & (1 << 0))
+        self.is_first_barline_omitted = bool(effects & (1 << 3))
+
+
+class UninheritedTimingPoint:
+    def __init__(self, time, beat_duration, meter, sample_set,
+                 sample_index, volume, effects):
+        self.time = time
+        self.beat_duration = beat_duration
+        self.meter = meter
+        self.sample_set = sample_set
+        self.sample_index = sample_index
+        self.volume = volume
+        self.effects = Effects(effects) if effects is not None else None
+
+
+class InheritedTimingPoint:
+    def __init__(self, time, slider_velocity, sample_set,
+                 sample_index, volume, effects):
+        self.time = time
+        self.slider_velocity = 1/(-slider_velocity/100)
+        self.sample_set = sample_set
+        self.sample_index = sample_index
+        self.volume = volume
+        self.effects = Effects(effects) if effects is not None else None
+
+
+class TimingPoint:
+    def __new__(cls, string):
+        data = string.split(",")
+        time = float(data[0])
+        beat_length = float(data[1])
+        # TODO: find some default values for these I guess
+        meter = int(data[2]) if len(data) > 2 else None
+        sample_set = get_sample_set(data[3]) if len(data) > 3 else None
+        sample_index = int(data[4]) if len(data) > 4 else None
+        volume = int(data[5]) if len(data) > 5 else None
+        uninherited = bool(data[6]) if len(data) > 6 else None
+        effects = int(data[7]) if len(data) > 7 else None
+        if uninherited:
+            return UninheritedTimingPoint(time, beat_length, meter, sample_set,
+                                          sample_index, volume, effects)
+        return InheritedTimingPoint(time, beat_length, sample_set, sample_index,
+                                    volume, effects)
+
+
+class Colour:
+    def __init__(self, colour):
+        self.int_colour = colour
+
+    @classmethod
+    def from_hex(cls, hex_colour):
+        if hex_colour is None:
+            return
+        hex_colour = hex_colour.replace("#", "")  # Just in case
+        return cls(int("0x"+hex_colour, 16))
+
+    @classmethod
+    def from_rgb(cls, red, green, blue):
+        if None in (red, green, blue):
+            return
+        return cls(int(hex(red)+hex(green)[2:]+hex(blue)[2:], 16))
+
+    @classmethod
+    def from_rgb_string(cls, string):
+        if string is None:
+            return
+        return cls.from_rgb(*list(map(
+            lambda val: int(val.strip()),
+            string.split(",")
+        )))
+
+    @property
+    def hex_colour(self):
+        return hex(self.int_colour)[2:]
+
+    @property
+    def rgb_colour(self):
+        hex_colour = self.hex_colour
+        return int(hex_colour[:2], 16), int(hex_colour[2:4], 16), int(hex_colour[4:6], 16)
+
+
+class Colours:
+    def __init__(self, data):
+        self.combo_colours = {}
+        for combo, colour in data.items():
+            if combo.startswith("Combo"):
+                self.combo_colours.update({
+                    int(combo.replace("Combo", "")): Colour.from_rgb_string(colour)
+                })
+        self.slider_track_override = Colour.from_rgb_string(data.get("SliderTrackOverride"))
+        self.slider_border = Colour.from_rgb_string(data.get("SliderBorder"))
 
 
 class Beatmap:
     def __init__(self, reader: BeatmapReader):
         self.reader = reader
-        self.data = None
+        self.general = None
+        self.editor = None
+        self.metadata = None
+        self.difficulty = None
+        self.events = None
+        self.timing_points = None
+        self.colours = None
+        self.hit_objects = None
 
     def load(self):
-        self.data = self.reader.load_beatmap_data()
-        self._format_data()
+        try:
+            data = self.reader.load_beatmap_data()
+        except:
+            print(f"There was a problem while loading the data in {self.reader.path}\n{traceback.format_exc()}")
+            return False
+        self.general = data.get("General")
+        self.editor = data.get("Editor")
+        self.metadata = data.get("Metadata")
+        self.difficulty = data.get("Difficulty")
+        self.events = data.get("Events")
+        self.timing_points = data.get("TimingPoints")
+        self.colours = data.get("Colours")
+        self.hit_objects = data.get("HitObjects")
+        try:
+            self._format_data()
+            return True
+        except:
+            print(f"There was a problem while formatting the data in {self.reader.path}\n{traceback.format_exc()}")
+            return False
 
     def _format_data(self):
-        pass
+        self.general = General(self.reader.path, self.general) if self.general is not None else None
+        self.editor = Editor(self.editor) if self.editor is not None else None
+        self.metadata = Metadata(self.metadata) if self.metadata is not None else None
+        self.difficulty = Difficulty(self.difficulty) if self.difficulty is not None else None
+        self.timing_points = list(map(TimingPoint, self.timing_points)) if self.timing_points is not None else None
+        self.colours = Colours(self.colours) if self.colours is not None else None
+        self.hit_objects = list(map(HitObject, self.hit_objects)) if self.hit_objects is not None else None
+
+    @property
+    def path(self):
+        return self.reader.path
+
+    def __iter__(self):
+        return iter(self.hit_objects)
 
 
 class Beatmapset:
@@ -29,6 +343,9 @@ class Beatmapset:
     @property
     def beatmaps(self) -> Sequence[Beatmap]:
         return self.reader.beatmaps
+
+    def __iter__(self):
+        return iter(self.beatmaps)
 
 
 class SongsFolder:
@@ -55,18 +372,5 @@ class SongsFolder:
     def path(self):
         return self.reader.path
 
-
-class HitObject:
-    pass
-
-
-class HitCircle(HitObject):
-    pass
-
-
-class Slider(HitObject):
-    pass
-
-
-class Spinner(HitObject):
-    pass
+    def __iter__(self):
+        return iter(self.beatmapsets)

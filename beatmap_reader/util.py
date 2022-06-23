@@ -1,4 +1,5 @@
 import os
+from .enums import SampleSet
 
 
 def confirm(path):
@@ -35,3 +36,14 @@ def search_for_songs_folder(confirmation_function=confirm):
         path = recursion("/")
         if path is None: return
         if confirmation_function(path): return path
+
+
+def get_sample_set(sample_set):
+    if sample_set.lower() == "none":
+        return
+    if sample_set.isdigit():
+        sample_set = {
+            "0": "Default", "1": "Normal",
+            "2": "Soft", "3": "Drum"
+        }[sample_set]
+    return SampleSet(sample_set)

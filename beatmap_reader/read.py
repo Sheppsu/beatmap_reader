@@ -58,6 +58,8 @@ class BeatmapReader:
                     current_section = line[1:-1]
                     data.update({current_section: {} if current_section in self.key_value_sections else []})
                     continue
+                if current_section is None:
+                    continue
                 if current_section in self.key_value_sections:
                     # Done this way for safety
                     split = line.split(":")

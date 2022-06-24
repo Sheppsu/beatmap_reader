@@ -53,20 +53,108 @@ class HitCircle(HitObjectBase):
 
 
 class Point:
-    def __init__(self, x, y):
+    def __init__(self, x: int, y: int, anchor_points: bool = False):
         self.x = x
         self.y = y
+        self.anchor_point = anchor_points
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y and self.anchor_point == other.anchor_point
+
+
+class Points:
+    def __init__(self, points: Sequence[Point]):
+        self.points = []
+        offset = 0
+        for i in range(len(points)-1):
+            if points[i+offset] == points[i+offset+1]:
+                points[i+offset+1].anchor_point = True
+                offset += 1
+            self.points.append(points[i+offset])
+
+    def split(self):
+        points = [[]]
+        for point in self.points:
+            points[-1].append(point)
+            if point.anchor_point:
+                points.append([point])
+        return points
+
+    def __iter__(self):
+        return iter(self.points)
+
+    @classmethod
+    def from_string(cls, string):
+        return cls(
+            list(map(
+                lambda point: Point(*tuple(map(
+                    int, point.split(":"))
+                )),
+                string.split(",")))
+        )
+
+
+class CurveBase:
+    def __init__(self, points):
+        self.points = points
+        self.curve_function_cache = None
+
+
+class Bezier(CurveBase):
+    def __init__(self, points):
+        super().__init__(points)
+
+    @property
+    def curve_function(self):
+        if self.curve_function_cache is not None:
+            return self.curve_function_cache
+        return
+
+
+class PerfectCircle(CurveBase):
+    def __init__(self, points):
+        super().__init__(points)
+
+    @property
+    def curve_function(self):
+        if self.curve_function_cache is not None:
+            return self.curve_function_cache
+        return
+
+
+class Linear(CurveBase):
+    def __init__(self, points):
+        super().__init__(points)
+
+    @property
+    def curve_function(self):
+        if self.curve_function_cache is not None:
+            return self.curve_function_cache
+        return
+
+
+class CatMull(CurveBase):
+    def __init__(self, points):
+        super().__init__(points)
+
+    @property
+    def curve_function(self):
+        if self.curve_function_cache is not None:
+            return self.curve_function_cache
+        return
 
 
 class Curve:
-    # TODO: Create the different curve types
-    def __init__(self, curve_data):
+    def __new__(cls, curve_data):
         curve_data = curve_data.split("|")
-        self.type = curve_data[0]
-        self.points = list(map(
-            lambda point: Point(*tuple(map(int, point.split(":")))),
-            curve_data[1:]
-        ))
+        type = curve_data[0].upper()
+        points = Points.from_string(curve_data[1])
+        return {
+            "B": Bezier,
+            "P": PerfectCircle,
+            "L": Linear,
+            "C": CatMull,
+        }[type](points)
 
 
 class Slider(HitObjectBase):

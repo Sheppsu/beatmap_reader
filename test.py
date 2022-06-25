@@ -1,5 +1,4 @@
-from beatmap_reader import SongsFolder
-import random
+from beatmap_reader import SongsFolder, HitObjectType, CurveType
 
 
 songs = "C:\\Users\\Sheep\\Desktop\\osu!\\Songs"
@@ -15,3 +14,8 @@ for beatmapset in folder:
         break
     for beatmap in beatmapset:
         beatmap.load()
+        for obj in beatmap.hit_objects:
+            if obj.type == HitObjectType.SLIDER and obj.curve.type == CurveType.PERFECT:
+                print(obj.curve.curve_points)
+                quit()
+

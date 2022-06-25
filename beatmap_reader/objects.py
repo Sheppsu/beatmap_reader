@@ -1,14 +1,14 @@
-import traceback
-
 from .read import SongsReader, BeatmapsetReader, BeatmapReader
 from .util import search_for_songs_folder, get_sample_set
 from .enums import *
-from typing import Sequence
+from .curve import Curve
+from typing import Sequence, Union
 import os
+import traceback
 
 
 class HitObject:
-    def __new__(cls, data):
+    def __new__(cls, parent, data):
         # TODO: hit sound and hit sample objects
         data = data.split(",")
         x, y = int(data[0]), int(data[1])
@@ -20,24 +20,25 @@ class HitObject:
         params = data[5:]
         hit_sample = params.pop(-1) if params and ":" in params[-1] else None
         if type & (1 << 0):
-            return HitCircle(params, x, y, time, new_combo, combo_colour_skip,
+            return HitCircle(params, parent, x, y, time, new_combo, combo_colour_skip,
                              hit_sound, hit_sample)
         elif type & (1 << 1):
-            return Slider(params, x, y, time, new_combo, combo_colour_skip,
+            return Slider(params, parent, x, y, time, new_combo, combo_colour_skip,
                           hit_sound, hit_sample)
         elif type & (1 << 3):
-            return Spinner(params, x, y, time, new_combo, combo_colour_skip,
+            return Spinner(params, parent, x, y, time, new_combo, combo_colour_skip,
                            hit_sound, hit_sample)
         elif type & (1 << 7):
-            return ManiaHoldKey(params, x, y, time, new_combo, combo_colour_skip,
+            return ManiaHoldKey(params, parent, x, y, time, new_combo, combo_colour_skip,
                                 hit_sound, hit_sample)
         else:
             raise ValueError("Hit object does not have a valid type specified.")
 
 
 class HitObjectBase:
-    def __init__(self, x, y, time, new_combo, combo_colour_skip,
+    def __init__(self, parent, x, y, time, new_combo, combo_colour_skip,
                  hit_sound, hit_sample):
+        self.parent = parent
         self.x = x
         self.y = y
         self.time = time
@@ -48,119 +49,18 @@ class HitObjectBase:
 
 
 class HitCircle(HitObjectBase):
-    def __init__(self, params, *args):
-        super().__init__(*args)
+    type = HitObjectType.HITCIRCLE
 
-
-class Point:
-    def __init__(self, x: int, y: int, anchor_points: bool = False):
-        self.x = x
-        self.y = y
-        self.anchor_point = anchor_points
-
-    def __eq__(self, other):
-        return self.x == other.x and self.y == other.y and self.anchor_point == other.anchor_point
-
-
-class Points:
-    def __init__(self, points: Sequence[Point]):
-        self.points = []
-        offset = 0
-        for i in range(len(points)-1):
-            if points[i+offset] == points[i+offset+1]:
-                points[i+offset+1].anchor_point = True
-                offset += 1
-            self.points.append(points[i+offset])
-
-    def split(self):
-        points = [[]]
-        for point in self.points:
-            points[-1].append(point)
-            if point.anchor_point:
-                points.append([point])
-        return points
-
-    def __iter__(self):
-        return iter(self.points)
-
-    @classmethod
-    def from_string(cls, string):
-        return cls(
-            list(map(
-                lambda point: Point(*tuple(map(
-                    int, point.split(":"))
-                )),
-                string.split(",")))
-        )
-
-
-class CurveBase:
-    def __init__(self, points):
-        self.points = points
-        self.curve_function_cache = None
-
-
-class Bezier(CurveBase):
-    def __init__(self, points):
-        super().__init__(points)
-
-    @property
-    def curve_function(self):
-        if self.curve_function_cache is not None:
-            return self.curve_function_cache
-        return
-
-
-class PerfectCircle(CurveBase):
-    def __init__(self, points):
-        super().__init__(points)
-
-    @property
-    def curve_function(self):
-        if self.curve_function_cache is not None:
-            return self.curve_function_cache
-        return
-
-
-class Linear(CurveBase):
-    def __init__(self, points):
-        super().__init__(points)
-
-    @property
-    def curve_function(self):
-        if self.curve_function_cache is not None:
-            return self.curve_function_cache
-        return
-
-
-class CatMull(CurveBase):
-    def __init__(self, points):
-        super().__init__(points)
-
-    @property
-    def curve_function(self):
-        if self.curve_function_cache is not None:
-            return self.curve_function_cache
-        return
-
-
-class Curve:
-    def __new__(cls, curve_data):
-        curve_data = curve_data.split("|")
-        type = curve_data[0].upper()
-        points = Points.from_string(curve_data[1])
-        return {
-            "B": Bezier,
-            "P": PerfectCircle,
-            "L": Linear,
-            "C": CatMull,
-        }[type](points)
+    def __init__(self, params, parent, *args):
+        super().__init__(parent, *args)
 
 
 class Slider(HitObjectBase):
-    def __init__(self, params, *args):
-        super().__init__(*args)
-        self.curve = Curve(params[0])
+    type = HitObjectType.SLIDER
+
+    def __init__(self, params, parent, *args):
+        super().__init__(parent, *args)
+        self.curve = Curve(params[0], self)
         self.slides = int(params[1])
         self.length = float(params[2])
         # TODO: yeppers
@@ -169,16 +69,20 @@ class Slider(HitObjectBase):
 
 
 class Spinner(HitObjectBase):
-    def __init__(self, params, *args):
-        super().__init__(*args)
+    type = HitObjectType.SPINNER
+
+    def __init__(self, params, parent, *args):
+        super().__init__(parent, *args)
         self.end_time = int(params[0])
         self.x = 256
         self.y = 192
 
 
 class ManiaHoldKey(HitObjectBase):
-    def __init__(self, params, *args):
-        super().__init__(*args)
+    type = HitObjectType.MANIA_HOLD_KEY
+
+    def __init__(self, params, parent, *args):
+        super().__init__(parent, *args)
         self.end_time = int(self.hit_sample.split(":")[0])
         self.hit_sample = self.hit_sample[len(str(self.end_time))+1:]
 
@@ -371,14 +275,14 @@ class Colours:
 class Beatmap:
     def __init__(self, reader: BeatmapReader):
         self.reader = reader
-        self.general = None
-        self.editor = None
-        self.metadata = None
-        self.difficulty = None
-        self.events = None
-        self.timing_points = None
-        self.colours = None
-        self.hit_objects = None
+        self.general: Union[General, dict, None] = None
+        self.editor: Union[Editor, dict, None] = None
+        self.metadata: Union[Metadata, dict, None] = None
+        self.difficulty: Union[Difficulty, dict, None] = None
+        self.events: Union[Events, dict, None] = None
+        self.timing_points: Union[Sequence[TimingPoint], dict, None] = None
+        self.colours: Union[Colours, dict, None] = None
+        self.hit_objects: Union[Sequence[HitObject], dict, None] = None
 
     def load(self):
         try:
@@ -408,7 +312,7 @@ class Beatmap:
         self.difficulty = Difficulty(self.difficulty) if self.difficulty is not None else None
         self.timing_points = list(map(TimingPoint, self.timing_points)) if self.timing_points is not None else None
         self.colours = Colours(self.colours) if self.colours is not None else None
-        self.hit_objects = list(map(HitObject, self.hit_objects)) if self.hit_objects is not None else None
+        self.hit_objects = list(map(lambda data: HitObject(self, data), self.hit_objects)) if self.hit_objects is not None else None
 
     @property
     def path(self):

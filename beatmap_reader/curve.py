@@ -62,11 +62,13 @@ class CurveBase:
 
     @property
     def curve_points(self):
+        if not hasattr(self, "_get_t_points"):
+            raise NotImplementedError()
         if self.curve_points_cache is not None:
             return self.curve_points_cache
         curve_function = self._create_curve_functions()
-        t_points = np.linspace(0, 1, round(self.parent.length))
-        self.curve_points_cache = (list(map(curve_function[0], t_points)), list(map(curve_function[1], t_points)))
+        t_points = self._get_t_points()
+        self.curve_points_cache = (list(map(curve_function[0], t_points[0])), list(map(curve_function[1], t_points[1])))
         return self.curve_points_cache
 
 
@@ -83,21 +85,29 @@ class PerfectCircle(CurveBase):
     def __init__(self, points, parent):
         super().__init__(points, parent)
 
+        self.radius1 = None
+        self.radius2 = None
+
+    def _get_t_points(self):
+        if self.radius1 is None or self.radius2 is None:
+            return
+        return np.linspace(0, 1, math.ceil(math.pi*2*self.radius1)), \
+               np.linspace(0, 1, math.ceil(math.pi*2*self.radius2))
+
     def _create_curve_functions(self):
         p0, p1, p2 = self.points
         print(p0, p1, p2)
         y = (p1.x**2 + p1.y**2 - p0.x**2 - p0.y**2) / \
-            2*(-(p2.y - p1.y)*(p1.x - p0.x)/(p2.x-p1.x) + p1.y - p0.y) - \
+            (2*(-(p2.y - p1.y)*(p1.x - p0.x)/(p2.x-p1.x) + p1.y - p0.y)) - \
             (p1.x - p0.x)*(p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2) / \
-            2*(p2.x-p1.x)*(-(p2.y-p1.y)*(p1.x-p0.x)/(p2.x-p1.x)+p1.y-p0.y)
+            (2*(p2.x-p1.x)*(-(p2.y-p1.y)*(p1.x-p0.x)/(p2.x-p1.x)+p1.y-p0.y))
         x = (p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2) / \
-            2*(p2.x-p1.x) - \
+            (2*(p2.x-p1.x)) - \
             (p2.y - p1.y)*y / (p2.x - p1.x)
         m_point = Point(x, y)
         radius = math.sqrt((m_point.x-p0.x)**2 + (m_point.y - p0.y)**2)
         radius_offset = (54.4 - 4.48 * self.parent.parent.difficulty.circle_size) / 2
-        lower_radius, higher_radius = radius - radius_offset, radius + radius_offset
-        print(m_point)
+        self.radius1, self.radius2 = radius - radius_offset, radius + radius_offset
         circle = (
             lambda r: (
                 lambda t: (
@@ -106,7 +116,7 @@ class PerfectCircle(CurveBase):
                 )
             )
         )
-        return circle(lower_radius), circle(higher_radius)
+        return circle(self.radius1), circle(self.radius2)
 
 
 class Linear(CurveBase):

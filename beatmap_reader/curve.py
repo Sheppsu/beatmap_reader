@@ -60,10 +60,11 @@ class CurveBase:
     def _create_curve_functions(self):
         raise NotImplementedError()
 
+    def _get_t_points(self):
+        raise NotImplementedError()
+
     @property
     def curve_points(self):
-        if not hasattr(self, "_get_t_points"):
-            raise NotImplementedError()
         if self.curve_points_cache is not None:
             return self.curve_points_cache
         curve_function = self._create_curve_functions()

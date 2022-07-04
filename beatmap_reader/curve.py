@@ -121,6 +121,9 @@ class Points:
     def __len__(self):
         return len(self.points)
 
+    def __str__(self):
+        return ", ".join(list(map(str, self.points)))
+
     @classmethod
     def from_string(cls, strings: Sequence[str]):
         return cls(
@@ -212,40 +215,45 @@ class Linear(CurveBase):
     def __init__(self, points, parent):
         super().__init__(points, parent)
 
-    @staticmethod
-    def get_offset_point(p0, p1, p2, p0o):
+    def get_offset_point(self, p0, p1, p2, p0o, a_or_b):
+        # TODO: account for undefined slope
+        p2o = p2 + p1.perpendicular_vector(p2)*self.radius_offset*(1 if a_or_b else -1)
         m0 = p0.slope(p1)
-        m2 = p2.slope(p1)
-        m1 = math.tan(
-            ((math.atan(m0) if m0 is not None else -math.pi) +
-             (math.atan(m2) if m2 is not None else -math.pi)) /
-            2 + math.pi)
-        pox = (m1 * p1.x - m0 * p0o.x + p0o.y - p1.y) / (m1 - m0) if m0 is not None else p0o.x
-        poy = m1 * (pox - p1.x) + p1.y
+        m1 = p1.slope(p2)
+        if m0 is None:
+            pox = p0o.x
+        elif m1 is None:
+            pox = p2o.x
+        else:
+            pox = (m0*p0o.x - m1*p2o.x + p2o.y - p0o.y)/(m0 - m1)
+        if m0 is not None:
+            poy = m0*(pox - p0o.x) + p0o.y
+        elif m1 is not None:
+            poy = m1 * (pox - p2o.x) + p2o.y
+        else:
+            poy = p0o.y + (p0.y - p1.y)
         return Point(pox, poy)
 
     def _save_curve_result(self, offset_curves, max_t=1):
         self.curve_points_cache = [list(map(lambda p: tuple(round(p)), oc)) for oc in offset_curves]
 
     def create_curve_functions(self):
-        # TODO: incorporate max t
+        # TODO: limit curve to max length
         offset_points = ([], [])
-        total_length = 0
-        for i in range(len(self.points)-1):
-            total_length += self.points[i].distance_to(self.points[i+1])
+        for i in range(len(self.points)):
             if i == 0:
                 p0, p1 = self.points[i], self.points[i + 1]
                 offset_vector = p0.perpendicular_vector(p1)*self.radius_offset
                 offset_points[0].append(p0 + offset_vector)
                 offset_points[1].append(p0 - offset_vector)
-            elif i == len(self.points)-2:
-                p0, p1 = self.points[i], self.points[i + 1]
+            elif i == len(self.points)-1:
+                p0, p1 = self.points[i-1], self.points[i]
                 offset_vector = p0.perpendicular_vector(p1) * self.radius_offset
                 offset_points[0].append(p1 + offset_vector)
                 offset_points[1].append(p1 - offset_vector)
             else:
-                offset_points[0].append(self.get_offset_point(*self.points[i-1:i+2], offset_points[0][i-1]))
-                offset_points[1].append(self.get_offset_point(*self.points[i-1:i+2], offset_points[1][i-1]))
+                offset_points[0].append(self.get_offset_point(*self.points[i-1:i+2], offset_points[0][i-1], True))
+                offset_points[1].append(self.get_offset_point(*self.points[i-1:i+2], offset_points[1][i-1], False))
 
         self._save_curve_result(offset_points)
 

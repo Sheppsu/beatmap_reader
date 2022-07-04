@@ -350,10 +350,11 @@ class SongsFolder:
     def from_path(cls, path=None, confirmation_function=None):
         path = path
         if path is None:
+            print("Searching for osu! songs folder...")
             args = [confirmation_function] if confirmation_function is not None else []
             path = search_for_songs_folder(*args)
             if path is None:
-                raise Exception("Bruh")  # TODO: b3uofqwfeniOGUWgbeu
+                raise Exception("Bruh")  # TODO: b3uofqwfeniOGUWgbeuW
         return cls(SongsReader(path))
 
     @property

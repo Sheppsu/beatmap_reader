@@ -4,7 +4,7 @@ from .enums import SampleSet
 
 def confirm(path):
     m, options = "", ("y", "n", "yes", "no")
-    while m not in options: m = input(f"Should I use {path} to load your maps?").lower()
+    while m not in options: m = input(f"Should I use {path} to load your maps? ").lower()
     return not bool(options.index(m) % 2)
 
 
@@ -17,25 +17,11 @@ def is_beatmapset(path):
 
 def search_for_songs_folder(confirmation_function=confirm):
     # This function is pretty slow lol
-    def recursion(path):
-        try:
-            files = os.listdir(path)
-        except PermissionError:
-            return
-        if "osu!.exe" in files and "Songs" in files:
-            return os.path.join(path, "Songs")
-        for file in files:
-            try:
-                m = recursion(os.path.join(path, file))
-                if m is not None:
-                    return m
-            except NotADirectoryError:
-                pass
-
-    while True:
-        path = recursion("/")
-        if path is None: return
-        if confirmation_function(path): return path
+    for root, dirs, files in os.walk("/"):
+        if "osu!.exe" in files and "Songs" in dirs:
+            path = os.path.join(root, "Songs")
+            if confirm(path):
+                return path
 
 
 def get_sample_set(sample_set):

@@ -50,5 +50,5 @@ setuptools.setup(
     classifiers=classifiers,
     python_requires=">=3.8.0",
     license="MIT",
-    url="https://github.com/Sheepposu/beatmap_readers",
+    url="https://github.com/Sheepposu/beatmap_reader",
 )

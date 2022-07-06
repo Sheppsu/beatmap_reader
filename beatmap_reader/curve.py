@@ -142,6 +142,10 @@ class CurveBase:
         self.parent = parent
         self.radius_offset = (54.4 - 4.48 * self.parent.parent.difficulty.circle_size) / 2
         self.curve_points_cache = None
+        self.osu_pixel_multiplier = 1
+
+    def set_multiplier(self, multiplier):
+        self.osu_pixel_multiplier = multiplier
 
     def create_curve_functions(self):
         raise NotImplementedError()
@@ -158,7 +162,7 @@ class Bezier(CurveBase):
 
     def _get_t_points(self, max_t=1):
         # TODO: limit curve to max length
-        return np.linspace(0, max_t, math.ceil(self.parent.length))
+        return np.linspace(0, max_t, math.ceil(self.parent.length*self.osu_pixel_multiplier))
 
     def _save_curve_result(self, curves, max_t=1):
         t_points = self._get_t_points(max_t)
@@ -198,7 +202,7 @@ class PerfectCircle(CurveBase):
         self.radius = None
 
     def _get_t_points(self, max_t=1):
-        return np.linspace(0, max_t, math.ceil(self.radius*2*math.pi*(max_t/1)))
+        return np.linspace(0, max_t, math.ceil(self.radius*2*math.pi*(max_t/1)*self.osu_pixel_multiplier))
 
     def _save_curve_result(self, curve, max_t=1):
         t_points = self._get_t_points(max_t)
@@ -228,9 +232,8 @@ class Linear(CurveBase):
     def __init__(self, points, parent):
         super().__init__(points, parent)
 
-    @staticmethod
-    def _get_t_points(lines):
-        return [np.linspace(0, 1, math.ceil(line[0].distance_to(line[1]))) for line in lines]
+    def _get_t_points(self, lines):
+        return [np.linspace(0, 1, math.ceil(line[0].distance_to(line[1])*self.osu_pixel_multiplier)) for line in lines]
 
     def _save_curve_result(self, line_func, lines, max_t=1):
         t_points = self._get_t_points(lines)
@@ -257,7 +260,7 @@ class CatMull(CurveBase):
 
     def _get_t_points(self, max_t=1):
         # TODO: limit curve to max length
-        return np.linspace(0, max_t, math.ceil(self.parent.length))
+        return np.linspace(0, max_t, math.ceil(self.parent.length*self.osu_pixel_multiplier))
 
     def _save_curve_result(self, curves, max_t=1):
         t_points = self._get_t_points(max_t)

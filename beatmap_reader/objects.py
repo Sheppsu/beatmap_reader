@@ -5,6 +5,7 @@ from .curve import Curve
 from typing import Sequence, Union
 import os
 import traceback
+import pygame
 
 
 class HitObject:
@@ -66,6 +67,18 @@ class Slider(HitObjectBase):
         # TODO: yeppers
         self.edge_sounds = params[3] if len(params) > 3 else None
         self.edge_sets = params[4] if len(params) > 4 else None
+
+        self.surf = None
+
+    def render(self, screen_size=(640, 480), placement_offset=(64, 48), osu_pixel_multiplier=1):
+        surf = pygame.Surface(screen_size)
+        surf.set_colorkey((0, 0, 0))
+        for point in self.curve.curve_points:
+            pygame.draw.circle(surf, (255, 0, 0),
+                               (point[0]*osu_pixel_multiplier + placement_offset[0],
+                                point[1]*osu_pixel_multiplier + placement_offset[1]),
+                               self.curve.radius_offset)
+        self.surf = surf
 
 
 class Spinner(HitObjectBase):

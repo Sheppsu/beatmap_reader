@@ -47,41 +47,43 @@ def is_implemented(slider):
 
 sliders = get_sliders()
 sliders = [slider for slider in sliders if is_implemented(slider)]
-colors = [
-    (255, 0, 0),
-    (0, 255, 0),
-    (0, 0, 255),
-    (255, 0, 255),
-]
+for slider in sliders:
+    slider.render()
 
 
 pygame.init()
-screen = pygame.display.set_mode((800, 600))
+screen = pygame.display.set_mode((640, 480))
 clock = pygame.time.Clock()
 
 draw_points = True
+draw_sliders = {
+    CurveType.PERFECT: True,
+    CurveType.BEZIER: True,
+    CurveType.CATMULL: True,
+    CurveType.LINEAR: True,
+}
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             quit()
         if event.type == pygame.KEYDOWN:
+            slider_keys = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]
             if event.key == pygame.K_p:
                 draw_points = not draw_points
+            if event.key in slider_keys:
+                slider_type = list(draw_sliders.keys())[slider_keys.index(event.key)]
+                draw_sliders[slider_type] = not draw_sliders[slider_type]
 
     screen.fill((0, 0, 0))
 
-    for i in range(len(sliders)):
-        pygame.draw.lines(screen, colors[i % len(colors)], False, sliders[i].curve.curve_points[0], 1)
-        pygame.draw.lines(screen, colors[i % len(colors)], False, sliders[i].curve.curve_points[1], 1)
-        pygame.draw.circle(screen, colors[i], (sliders[i].x, sliders[i].y), sliders[i].curve.radius_offset)
-        pygame.draw.circle(screen, colors[i], tuple(sliders[i].curve.points[-1]), sliders[i].curve.radius_offset)
+    for slider in sliders:
+        if not draw_sliders[slider.curve.type]:
+            continue
+        screen.blit(slider.surf, (0, 0))
         if draw_points:
-            for point in sliders[i].curve.points:
-                pygame.draw.circle(screen, [255, 255, 0], tuple(point), 1)
-            for points in sliders[i].curve.curve_points:
-                for point in points:
-                    pygame.draw.circle(screen, [0, 255, 255], tuple(point), 1)
+            for point in slider.curve.points:
+                pygame.draw.circle(screen, (255, 255, 255), (point[0]+64, point[1]+48), 2)
 
     pygame.display.update()
     clock.tick(60)

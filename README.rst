@@ -1,0 +1,1 @@
+This library was made specifically for a project I'm working on with a friend. I might do something more with it in the future.

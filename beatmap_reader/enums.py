@@ -40,3 +40,8 @@ class CurveType(IntEnum):
     PERFECT = 1
     BEZIER = 2
     CATMULL = 3
+
+
+class TimingPointType(IntEnum):
+    UNINHERITED = 0
+    INHERITED = 1

@@ -140,7 +140,7 @@ class CurveBase:
     def __init__(self, points: Points, parent):
         self.points = points
         self.parent = parent
-        self.radius_offset = (54.4 - 4.48 * self.parent.parent.difficulty.circle_size) / 2
+        self.radius_offset = (54.4 - 4.48 * self.parent.parent.difficulty.circle_size)
         self.curve_points_cache = None
         self.osu_pixel_multiplier = 1
 
@@ -210,13 +210,20 @@ class PerfectCircle(CurveBase):
 
     def create_curve_functions(self):
         p0, p1, p2 = self.points
-        y = (p1.x**2 + p1.y**2 - p0.x**2 - p0.y**2) / \
-            (2*(-(p2.y - p1.y)*(p1.x - p0.x)/(p2.x-p1.x) + p1.y - p0.y)) - \
-            (p1.x - p0.x)*(p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2) / \
-            (2*(p2.x-p1.x)*(-(p2.y-p1.y)*(p1.x-p0.x)/(p2.x-p1.x)+p1.y-p0.y))
-        x = (p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2) / \
-            (2*(p2.x-p1.x)) - \
-            (p2.y - p1.y)*y / (p2.x - p1.x)
+
+        def div(a, b):
+            try:
+                return a / b
+            except ZeroDivisionError:
+                return 0
+
+        y = div(p1.x**2 + p1.y**2 - p0.x**2 - p0.y**2,
+                2*(-(p2.y - p1.y)*div(p1.x - p0.x, p2.x-p1.x) + p1.y - p0.y)) - \
+            div((p1.x - p0.x)*(p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2),
+                2*(p2.x-p1.x)*(-(p2.y-p1.y)*div(p1.x-p0.x, p2.x-p1.x)+p1.y-p0.y))
+        x = div(p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2,
+                (2*(p2.x-p1.x))) - \
+            div((p2.y - p1.y)*y, p2.x - p1.x)
         m_point = Point(x, y)
         self.radius = math.sqrt((m_point.x-p0.x)**2 + (m_point.y - p0.y)**2)
         start_angle = 2*math.pi-math.atan2(p0.y-m_point.y, p0.x-m_point.x)

@@ -69,12 +69,27 @@ class Slider(HitObjectBase):
         self.edge_sets = params[4] if len(params) > 4 else None
 
         self.surf = None
+        self.ui_timing_point = None
+        self.i_timing_point = None
+        for timing_point in self.parent.timing_points:
+            if timing_point.time <= self.time:
+                if timing_point.type == TimingPointType.UNINHERITED:
+                    self.ui_timing_point = timing_point
+                else:
+                    self.i_timing_point = timing_point
 
-    def render(self, screen_size=(640, 480), placement_offset=(64, 48), osu_pixel_multiplier=1):
+        if self.ui_timing_point is None:
+            self.ui_timing_point = self.parent.timing_points[0]
+
+        s_vel = self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1
+        self.end_time = round(self.time + self.ui_timing_point.beat_duration * self.length * self.slides / (self.parent.difficulty.slider_multiplier*s_vel*100))
+
+    def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(255, 255, 255)):
+        # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
         surf = pygame.Surface(screen_size)
         surf.set_colorkey((0, 0, 0))
         for point in self.curve.curve_points:
-            pygame.draw.circle(surf, (255, 0, 0),
+            pygame.draw.circle(surf, color,
                                (point[0]*osu_pixel_multiplier + placement_offset[0],
                                 point[1]*osu_pixel_multiplier + placement_offset[1]),
                                self.curve.radius_offset)
@@ -196,6 +211,8 @@ class Effects:
 
 
 class UninheritedTimingPoint:
+    type = TimingPointType.UNINHERITED
+
     def __init__(self, time, beat_duration, meter, sample_set,
                  sample_index, volume, effects):
         self.time = time
@@ -208,6 +225,8 @@ class UninheritedTimingPoint:
 
 
 class InheritedTimingPoint:
+    type = TimingPointType.INHERITED
+
     def __init__(self, time, slider_velocity, sample_set,
                  sample_index, volume, effects):
         self.time = time
@@ -228,9 +247,9 @@ class TimingPoint:
         sample_set = get_sample_set(data[3]) if len(data) > 3 else None
         sample_index = int(data[4]) if len(data) > 4 else None
         volume = int(data[5]) if len(data) > 5 else None
-        uninherited = bool(data[6]) if len(data) > 6 else None
+        uninherited = bool(int(data[6])) if len(data) > 6 else None
         effects = int(data[7]) if len(data) > 7 else None
-        if uninherited:
+        if uninherited or uninherited is None:
             return UninheritedTimingPoint(time, beat_length, meter, sample_set,
                                           sample_index, volume, effects)
         return InheritedTimingPoint(time, beat_length, sample_set, sample_index,
@@ -297,6 +316,8 @@ class Beatmap:
         self.colours: Union[Colours, dict, None] = None
         self.hit_objects: Union[Sequence[HitObject], dict, None] = None
 
+        self.fully_loaded = False
+
     def load(self):
         try:
             data = self.reader.load_beatmap_data()
@@ -313,6 +334,7 @@ class Beatmap:
         self.hit_objects = data.get("HitObjects")
         try:
             self._format_data()
+            self.fully_loaded = True
             return True
         except:
             print(f"There was a problem while formatting the data in {self.reader.path}\n{traceback.format_exc()}")

@@ -201,36 +201,56 @@ class PerfectCircle(CurveBase):
 
         self.radius = None
 
-    def _get_t_points(self, max_t=1):
-        return np.linspace(0, max_t, math.ceil(self.radius*2*math.pi*(max_t/1)*self.osu_pixel_multiplier))
+    def _get_t_points(self, min_t, max_t):
+        return np.linspace(min_t, max_t, math.ceil(self.parent.length*self.osu_pixel_multiplier))
 
-    def _save_curve_result(self, curve, max_t=1):
-        t_points = self._get_t_points(max_t)
+    def _save_curve_result(self, curve, min_t, max_t):
+        t_points = self._get_t_points(min_t, max_t)
         self.curve_points_cache = list(map(lambda p: tuple(map(round, curve(p))), t_points))
+
+    @staticmethod
+    def get_when_equal_x(p0, p1):
+        y = (p0.y + p1.y) / 2
+        x = (p0.x ** 2 - p1.x ** 2 + p0.y ** 2 - p1.y ** 2 + 2 * (p1.y - p0.y) * y) / (-2 * (p1.x - p0.x))
+        return x, y
+
+    @staticmethod
+    def get_when_equal_y(p0, p1):
+        x = (p0.x + p1.x) / 2
+        y = (p0.x ** 2 - p1.x ** 2 + p0.y ** 2 - p1.y ** 2 + 2 * (p1.x - p0.x) * x) / (-2 * (p1.y - p0.y))
+        return x, y
 
     def create_curve_functions(self):
         p0, p1, p2 = self.points
 
-        def div(a, b):
-            try:
-                return a / b
-            except ZeroDivisionError:
-                return 0
-
-        y = div(p1.x**2 + p1.y**2 - p0.x**2 - p0.y**2,
-                2*(-(p2.y - p1.y)*div(p1.x - p0.x, p2.x-p1.x) + p1.y - p0.y)) - \
-            div((p1.x - p0.x)*(p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2),
-                2*(p2.x-p1.x)*(-(p2.y-p1.y)*div(p1.x-p0.x, p2.x-p1.x)+p1.y-p0.y))
-        x = div(p2.x**2 + p2.y**2 - p1.x**2 - p1.y**2,
-                (2*(p2.x-p1.x))) - \
-            div((p2.y - p1.y)*y, p2.x - p1.x)
+        if p0.x == p1.x:
+            x, y = self.get_when_equal_x(p1, p2)
+        elif p1.x == p2.x:
+            x, y = self.get_when_equal_x(p0, p1)
+        elif p0.y == p1.y:
+            x, y = self.get_when_equal_y(p1, p2)
+        elif p1.y == p2.y:
+            x, y = self.get_when_equal_x(p0, p1)
+        else:
+            y = (p1.x ** 2 + p1.y ** 2 - p0.x ** 2 - p0.y ** 2) / \
+                (2 * (-(p2.y - p1.y) * (p1.x - p0.x) / (p2.x - p1.x) + p1.y - p0.y)) - \
+                (p1.x - p0.x) * (p2.x ** 2 + p2.y ** 2 - p1.x ** 2 - p1.y ** 2) / \
+                (2 * (p2.x - p1.x) * (-(p2.y - p1.y) * (p1.x - p0.x) / (p2.x - p1.x) + p1.y - p0.y))
+            x = (p2.x ** 2 + p2.y ** 2 - p1.x ** 2 - p1.y ** 2) / \
+                (2 * (p2.x - p1.x)) - \
+                (p2.y - p1.y) * y / (p2.x - p1.x)
         m_point = Point(x, y)
         self.radius = math.sqrt((m_point.x-p0.x)**2 + (m_point.y - p0.y)**2)
-        start_angle = 2*math.pi-math.atan2(p0.y-m_point.y, p0.x-m_point.x)
+        format_angle = lambda a: 2*math.pi - abs(a) if a < 0 else a
+        offset_angle = math.atan2(p0.y - m_point.y, p0.x - m_point.x)
+        start_angle = format_angle(offset_angle)
+        mid_angle = format_angle(format_angle(math.atan2(p1.y-m_point.y, p1.x-m_point.x))-start_angle)
+        end_angle = format_angle(format_angle(math.atan2(p2.y-m_point.y, p2.x-m_point.x))-start_angle)
+
         self._save_curve_result(lambda t: (
-            (self.radius*math.cos((1-t)*start_angle) + m_point.x),
-            (self.radius*math.sin((1-t)*start_angle) + m_point.y)
-        ), self.parent.length / (2*math.pi*self.radius))
+            self.radius * math.cos((t if end_angle > mid_angle else 1-t) * 2*math.pi + offset_angle) + m_point.x,
+            self.radius * math.sin((t if end_angle > mid_angle else 1-t) * 2*math.pi + offset_angle) + m_point.y
+        ), 0, (end_angle if end_angle > mid_angle else 2*math.pi - end_angle)/(2*math.pi))
 
 
 class Linear(CurveBase):

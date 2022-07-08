@@ -4,4 +4,4 @@ from .enums import *
 from .cache import *
 
 
-__version__ = "v0.1.0-alpha.1"
+__version__ = "v0.1.1"

@@ -92,7 +92,7 @@ class Slider(HitObjectBase):
             pygame.draw.circle(surf, color,
                                (point[0]*osu_pixel_multiplier + placement_offset[0],
                                 point[1]*osu_pixel_multiplier + placement_offset[1]),
-                               self.curve.radius_offset)
+                               self.curve.radius_offset*osu_pixel_multiplier)
         self.surf = surf
 
 

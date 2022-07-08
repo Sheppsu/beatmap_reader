@@ -88,11 +88,15 @@ class Slider(HitObjectBase):
         # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
         surf = pygame.Surface(screen_size)
         surf.set_colorkey((0, 0, 0))
-        for point in self.curve.curve_points:
-            pygame.draw.circle(surf, color,
-                               (point[0]*osu_pixel_multiplier + placement_offset[0],
-                                point[1]*osu_pixel_multiplier + placement_offset[1]),
-                               self.curve.radius_offset*osu_pixel_multiplier)
+        try:
+            for point in self.curve.curve_points:
+                pygame.draw.circle(surf, color,
+                                   (point[0]*osu_pixel_multiplier + placement_offset[0],
+                                    point[1]*osu_pixel_multiplier + placement_offset[1]),
+                                   self.curve.radius_offset*osu_pixel_multiplier)
+        except:
+            print(f"Error occurred while rendering slider at {self.time} in {self.parent.path}.")
+            traceback.print_exc()
         self.surf = surf
 
 

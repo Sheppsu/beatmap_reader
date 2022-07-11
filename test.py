@@ -28,6 +28,8 @@ def get_sliders():
             break
         for beatmap in beatmapset:
             beatmap.load()
+            if beatmap.hit_objects is None:
+                continue
             for obj in beatmap.hit_objects:
                 if obj.type == HitObjectType.SLIDER and len(sliders[obj.curve.type]) < 5:
                     sliders[obj.curve.type].append(obj)
@@ -41,7 +43,7 @@ def get_sliders():
 sliders = get_sliders()
 for slider_list in sliders.values():
     for slider in slider_list:
-        slider.render((640, 480), (0, 0))
+        slider.render((640, 480), (0, 0), color=(0, 255, 0), border_color=(0, 0, 255))
 
 
 pygame.init()

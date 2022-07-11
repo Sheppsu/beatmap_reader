@@ -82,18 +82,21 @@ class Slider(HitObjectBase):
             self.ui_timing_point = self.parent.timing_points[0]
 
         s_vel = self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1
-        self.end_time = round(self.time + self.ui_timing_point.beat_duration * self.length * self.slides / (self.parent.difficulty.slider_multiplier*s_vel*100))
+        self.end_time = round(self.time + self.ui_timing_point.beat_duration * self.length * self.slides /
+                              (self.parent.difficulty.slider_multiplier*s_vel*100))
 
-    def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(255, 255, 255)):
+    def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
+               border_color=(255, 255, 255)):
         # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
         surf = pygame.Surface(screen_size)
         surf.set_colorkey((0, 0, 0))
         try:
-            for point in self.curve.curve_points:
-                pygame.draw.circle(surf, color,
-                                   (point[0]*osu_pixel_multiplier + placement_offset[0],
-                                    point[1]*osu_pixel_multiplier + placement_offset[1]),
-                                   self.curve.radius_offset*osu_pixel_multiplier)
+            size = self.curve.radius_offset*osu_pixel_multiplier
+            for c, r in ((border_color, size), (color, size-1)):
+                for point in self.curve.curve_points:
+                    pygame.draw.circle(surf, c, (point[0] * osu_pixel_multiplier + placement_offset[0],
+                                                 point[1] * osu_pixel_multiplier + placement_offset[1]),
+                                       r)
         except:
             print(f"Error occurred while rendering slider at {self.time} in {self.parent.path}.")
             traceback.print_exc()

@@ -86,13 +86,13 @@ class Slider(HitObjectBase):
                               (self.parent.difficulty.slider_multiplier*s_vel*100))
 
     def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
-               border_color=(255, 255, 255)):
+               border_color=(255, 255, 255), border_thickness=1):
         # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
         surf = pygame.Surface(screen_size)
         surf.set_colorkey((0, 0, 0))
         try:
             size = self.curve.radius_offset*osu_pixel_multiplier
-            for c, r in ((border_color, size), (color, size-1)):
+            for c, r in ((border_color, size), (color, size-border_thickness)):
                 for point in self.curve.curve_points:
                     pygame.draw.circle(surf, c, (point[0] * osu_pixel_multiplier + placement_offset[0],
                                                  point[1] * osu_pixel_multiplier + placement_offset[1]),

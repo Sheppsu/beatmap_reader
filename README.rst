@@ -1,1 +1,1 @@
-This library was made specifically for a project I'm working on with a friend. I might do something more with it in the future.
+I plan on doing a lot with this library such as adding some pp calc. Once I've finished implementing everything I'll make sure to clean it up a bit and release it on PyPi.

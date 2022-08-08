@@ -12,7 +12,7 @@ class Util:
 
     @staticmethod
     def get_time_rate(mods: Mods):
-        if mods == 0:
+        if not mods:
             return 1
         if Mods.HalfTime in mods:
             return 0.75

@@ -35,7 +35,7 @@ class OsuScoreAttributes:
         return score_attributes
 
     def set_attributes(self, attributes: dict):
-        for k, v in attributes:
+        for k, v in attributes.items():
             setattr(self, k, v)
 
 

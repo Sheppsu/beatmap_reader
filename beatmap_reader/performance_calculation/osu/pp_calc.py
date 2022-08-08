@@ -43,7 +43,7 @@ class OsuPerformanceCalculator(PerformanceCalculator):
     def __init__(self, ruleset, attributes: OsuDifficultyAttributes, score: OsuScoreAttributes):
         super().__init__(ruleset, attributes, score)
 
-        self.mods = score.mods if score.mods is not None else 0
+        self.mods = score.mods if score.mods else []
         self.accuracy = score.accuracy
         self.score_max_combo = score.score_max_combo
         self.count_great = score.count_great

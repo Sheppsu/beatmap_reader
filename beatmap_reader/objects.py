@@ -1,128 +1,11 @@
 from .read import SongsReader, BeatmapsetReader, BeatmapReader
 from .util import search_for_songs_folder, get_sample_set
 from .enums import *
-from .curve import Curve
+from .hit_objects import HitObject
+from .calculator import BeatmapCalculator
 from typing import Sequence, Union
 import os
 import traceback
-import pygame
-
-
-class HitObject:
-    def __new__(cls, parent, data):
-        # TODO: hit sound and hit sample objects
-        data = data.split(",")
-        x, y = int(data[0]), int(data[1])
-        time = int(data[2])
-        type = int(data[3])
-        new_combo = bool(type & (1 << 2))
-        combo_colour_skip = 0 if not new_combo else type & 0b01110000
-        hit_sound = int(data[4]) if data[4] else None  # Got an error where the hit sound was missing :shrug:
-        params = data[5:]
-        hit_sample = params.pop(-1) if params and ":" in params[-1] else None
-        if type & (1 << 0):
-            return HitCircle(params, parent, x, y, time, new_combo, combo_colour_skip,
-                             hit_sound, hit_sample)
-        elif type & (1 << 1):
-            return Slider(params, parent, x, y, time, new_combo, combo_colour_skip,
-                          hit_sound, hit_sample)
-        elif type & (1 << 3):
-            return Spinner(params, parent, x, y, time, new_combo, combo_colour_skip,
-                           hit_sound, hit_sample)
-        elif type & (1 << 7):
-            return ManiaHoldKey(params, parent, x, y, time, new_combo, combo_colour_skip,
-                                hit_sound, hit_sample)
-        else:
-            raise ValueError("Hit object does not have a valid type specified.")
-
-
-class HitObjectBase:
-    def __init__(self, parent, x, y, time, new_combo, combo_colour_skip,
-                 hit_sound, hit_sample):
-        self.parent = parent
-        self.x = x
-        self.y = y
-        self.time = time
-        self.new_combo = new_combo
-        self.combo_colour_skip = combo_colour_skip
-        self.hit_sound = hit_sound
-        self.hit_sample = hit_sample
-
-
-class HitCircle(HitObjectBase):
-    type = HitObjectType.HITCIRCLE
-
-    def __init__(self, params, parent, *args):
-        super().__init__(parent, *args)
-
-
-class Slider(HitObjectBase):
-    type = HitObjectType.SLIDER
-
-    def __init__(self, params, parent, *args):
-        super().__init__(parent, *args)
-        self.curve = Curve(params[0], self)
-        self.slides = int(params[1])
-        self.length = float(params[2])
-        # TODO: yeppers
-        self.edge_sounds = params[3] if len(params) > 3 else None
-        self.edge_sets = params[4] if len(params) > 4 else None
-
-        self.surf = None
-        self.ui_timing_point = None
-        self.i_timing_point = None
-        for timing_point in self.parent.timing_points:
-            if timing_point.time <= self.time:
-                if timing_point.type == TimingPointType.UNINHERITED:
-                    self.ui_timing_point = timing_point
-                else:
-                    self.i_timing_point = timing_point
-
-        if self.ui_timing_point is None:
-            self.ui_timing_point = self.parent.timing_points[0]
-
-        s_vel = self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1
-        self.end_time = round(self.time + self.ui_timing_point.beat_duration * self.length * self.slides /
-                              (self.parent.difficulty.slider_multiplier*s_vel*100))
-
-    def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
-               border_color=(255, 255, 255), border_thickness=1):
-        # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
-        surf = pygame.Surface(screen_size)
-        surf.set_colorkey((0, 0, 0))
-        try:
-            size = self.curve.radius_offset*osu_pixel_multiplier
-            for c, r in ((border_color, size), (color, size-border_thickness)):
-                for point in self.curve.curve_points:
-                    pygame.draw.circle(surf, c, (point[0] * osu_pixel_multiplier + placement_offset[0],
-                                                 point[1] * osu_pixel_multiplier + placement_offset[1]),
-                                       r)
-        except:
-            print(f"Error occurred while rendering slider at {self.time} in {self.parent.path}.")
-            traceback.print_exc()
-        self.surf = surf
-
-
-class Spinner(HitObjectBase):
-    type = HitObjectType.SPINNER
-
-    def __init__(self, params, parent, *args):
-        super().__init__(parent, *args)
-        self.end_time = int(params[0])
-        self.x = 256
-        self.y = 192
-
-
-class ManiaHoldKey(HitObjectBase):
-    type = HitObjectType.MANIA_HOLD_KEY
-
-    def __init__(self, params, parent, *args):
-        super().__init__(parent, *args)
-        self.end_time = int(self.hit_sample.split(":")[0])
-        self.hit_sample = self.hit_sample[len(str(self.end_time))+1:]
-
-    def get_column(self, total_columns):
-        return self.x * total_columns // 512
 
 
 class General:
@@ -312,8 +195,11 @@ class Colours:
 
 
 class Beatmap:
+    STACK_DISTANCE = 3
+
     def __init__(self, reader: BeatmapReader):
         self.reader = reader
+        self.version: Union[int, None] = None
         self.general: Union[General, dict, None] = None
         self.editor: Union[Editor, dict, None] = None
         self.metadata: Union[Metadata, dict, None] = None
@@ -323,6 +209,7 @@ class Beatmap:
         self.colours: Union[Colours, dict, None] = None
         self.hit_objects: Union[Sequence[HitObject], dict, None] = None
 
+        self.difficulty_calculator = None
         self.fully_loaded = False
 
     def load(self):
@@ -331,6 +218,7 @@ class Beatmap:
         except:
             print(f"There was a problem while loading the data in {self.reader.path}\n{traceback.format_exc()}")
             return False
+        self.version = data["version"]
         self.general = data.get("General")
         self.editor = data.get("Editor")
         self.metadata = data.get("Metadata")
@@ -341,7 +229,13 @@ class Beatmap:
         self.hit_objects = data.get("HitObjects")
         try:
             self._format_data()
+            if self.version >= 6:
+                self._apply_stacking(0, len(self.hit_objects)-1)
+            else:
+                self._apply_stacking_old()
+            self._format_sliders()
             self.fully_loaded = True
+            self.difficulty_calculator = BeatmapCalculator(self)
             return True
         except:
             print(f"There was a problem while formatting the data in {self.reader.path}\n{traceback.format_exc()}")
@@ -355,6 +249,129 @@ class Beatmap:
         self.timing_points = list(map(TimingPoint, self.timing_points)) if self.timing_points is not None else None
         self.colours = Colours(self.colours) if self.colours is not None else None
         self.hit_objects = list(map(lambda data: HitObject(self, data), self.hit_objects)) if self.hit_objects is not None else None
+
+    def get_difficulty_attributes(self, mods=None):
+        if not self.fully_loaded:
+            raise Exception("Beatmap must be loaded to get difficulty attributes")
+        return self.difficulty_calculator.get_difficulty_attributes(mods)
+
+    def _format_sliders(self):
+        for hit_obj in self.hit_objects:
+            if hit_obj.type == HitObjectType.SLIDER:
+                hit_obj.create_nested_objects()
+
+    def _apply_stacking(self, start_index, end_index):
+        extended_end_index = end_index
+
+        if end_index < len(self.hit_objects) - 1:
+            for i in reversed(range(start_index, end_index+1)):
+                stack_base_index = i
+
+                for n in range(stack_base_index+1, len(self.hit_objects)):
+                    stack_base_obj = self.hit_objects[stack_base_index]
+                    if stack_base_obj.type == HitObjectType.SPINNER:
+                        break
+
+                    object_n = self.hit_objects[n]
+                    if object_n.type == HitObjectType.SPINNER:
+                        continue
+
+                    end_time = stack_base_obj.end_time
+                    stack_threshold = object_n.time_preempt * self.general.stack_leniency
+
+                    if object_n.time - end_time > stack_threshold:
+                        break
+
+                    if stack_base_obj.position.distance_to(object_n.position) < self.STACK_DISTANCE or \
+                            (stack_base_obj.type == HitObjectType.SLIDER and
+                             stack_base_obj.end_position.distance_to(object_n.position) < self.STACK_DISTANCE):
+                        stack_base_index = n
+                        object_n.stack_height = 0
+
+                if stack_base_index > extended_end_index:
+                    extended_end_index = stack_base_index
+                    if extended_end_index == len(self.hit_objects) - 1:
+                        break
+
+
+        extended_start_index = start_index
+
+        for i in reversed(range(start_index+1, extended_end_index+1)):
+            n = i
+
+            object_i = self.hit_objects[i]
+            if object_i.stack_height != 0 or object_i.type == HitObjectType.SPINNER:
+                continue
+
+            stack_threshold = object_i.time_preempt * self.general.stack_leniency
+
+            if object_i.type == HitObjectType.HITCIRCLE:
+                while n-1 >= 0:
+                    n -= 1
+                    object_n = self.hit_objects[n]
+                    if object_n.type == HitObjectType.SPINNER:
+                        continue
+
+                    if object_i.time - object_n.end_time > stack_threshold:
+                        break
+
+                    if n < extended_start_index:
+                        object_n.stack_height = 0
+                        extended_start_index = n
+
+                    if object_n.type == HitObjectType.SLIDER and object_n.end_position.distance_to(object_i.position) < self.STACK_DISTANCE:
+                        offset = object_i.stack_height - object_n.stack_height + 1
+
+                        for j in range(n+1, i+1):
+                            object_j = self.hit_objects[j]
+                            if object_n.position.distance_to(object_j.position) < self.STACK_DISTANCE:
+                                object_j.stack_height -= offset
+
+                        break
+
+                    if object_n.position.distance_to(object_i.position) < self.STACK_DISTANCE:
+                        object_n.stack_height = object_i.stack_height + 1
+                        object_i = object_n
+            elif object_i.type == HitObjectType.SLIDER:
+                while n-1 >= 0:
+                    n -= 1
+                    object_n = self.hit_objects[n]
+                    if object_n.type == HitObjectType.SPINNER:
+                        continue
+
+                    if object_i.time - object_n.time > stack_threshold:
+                        break
+
+                    if object_n.end_position.distance_to(object_i.position) < self.STACK_DISTANCE:
+                        object_n.stack_height = object_i.stack_height + 1
+                        object_i = object_n
+
+    def _apply_stacking_old(self):
+        for i in range(len(self.hit_objects)):
+            curr_hit_object = self.hit_objects[i]
+
+            if curr_hit_object.stack_height != 0 and curr_hit_object.type != HitObjectType.SLIDER:
+                continue
+
+            start_time = curr_hit_object.end_time
+            slider_stack = 0
+
+            for j in range(i+1, len(self.hit_objects)):
+                stack_threshold = self.hit_objects[i].time_preempt * self.general.stack_leniency
+
+                if self.hit_objects[j].time - stack_threshold > start_time:
+                    break
+
+                position2 = curr_hit_object.position + curr_hit_object.position_at(1) \
+                    if curr_hit_object.type == HitObjectType.SLIDER else curr_hit_object.position
+
+                if self.hit_objects[j].position.distance_to(curr_hit_object.position) < self.STACK_DISTANCE:
+                    curr_hit_object.stack_height += 1
+                    start_time = self.hit_objects[j].end_time
+                elif self.hit_objects[j].position.distance_to(position2) < self.STACK_DISTANCE:
+                    slider_stack += 1
+                    self.hit_objects[j].stack_height -= slider_stack
+                    start_time = self.hit_objects[j].end_time
 
     @property
     def path(self):

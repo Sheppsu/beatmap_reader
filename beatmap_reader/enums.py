@@ -1,4 +1,5 @@
 from enum import IntEnum, Enum
+from osu import Mods
 
 
 class Countdown(IntEnum):

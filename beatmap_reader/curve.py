@@ -21,48 +21,46 @@ class Point:
             return
         return (point.y - self.y) / (point.x - self.x)
 
+    def v(self):
+        return Vector(self.x, self.y)
+
+    @staticmethod
+    def _get_x_y(obj):
+        if isinstance(obj, int) or isinstance(obj, float):
+            return obj, obj
+        elif hasattr(obj, "x") and hasattr(obj, "y"):
+            return obj.x, obj.y
+        elif hasattr(obj, "__getitem__"):
+            return obj[0], obj[1]
+        else:
+            raise TypeError(f"Can't get x and y from type {type(obj)}")
+
     def __eq__(self, other):
         if not isinstance(other, Point):
             return False
         return self.x == other.x and self.y == other.y and self.anchor_point == other.anchor_point
 
     def __add__(self, other):
-        if isinstance(other, int) or isinstance(other, float):
-            return Point(self.x + other, self.y + other)
-        elif hasattr(other, "x") and hasattr(other, "y"):
-            return Point(self.x + other.x, self.y + other.y)
-        else:
-            raise TypeError(f"Can't add Point with type {type(other)}")
+        x, y = self._get_x_y(other)
+        return Point(self.x + x, self.y + y)
 
     def __sub__(self, other):
-        if isinstance(other, int) or isinstance(other, float):
-            return Point(self.x - other, self.y - other)
-        elif hasattr(other, "x") and hasattr(other, "y"):
-            return Point(self.x - other.x, self.y - other.y)
-        else:
-            raise TypeError(f"Can't subtract type {type(other)} from Point")
+        x, y = self._get_x_y(other)
+        return Point(self.x - x, self.y - y)
 
     def __mul__(self, other):
-        if isinstance(other, int) or isinstance(other, float):
-            return Point(self.x * other, self.y * other)
-        elif hasattr(other, "x") and hasattr(other, "y"):
-            return Point(self.x * other.x, self.y * other.y)
-        else:
-            raise TypeError(f"Can't multiply Point with type {type(other)}")
+        x, y = self._get_x_y(other)
+        return Point(self.x * x, self.y * y)
 
     def __truediv__(self, other):
-        if isinstance(other, int) or isinstance(other, float):
-            return Point(self.x / other, self.y / other)
-        elif hasattr(other, "x") and hasattr(other, "y"):
-            return Point(self.x / other.x, self.y / other.y)
-        else:
-            raise TypeError(f"Can't divide Point by type {type(other)}")
+        x, y = self._get_x_y(other)
+        return Point(self.x / x, self.y / y)
 
     def __round__(self, n=None):
         return Point(round(self.x, n), round(self.y, n))
 
     def __getitem__(self, index):
-        return [self.x, self.y][index]
+        return (self.x, self.y)[index]
 
     def __iter__(self):
         return iter([self.x, self.y])
@@ -84,6 +82,9 @@ class Vector:
         if magnitude == 0:
             return Vector(0, 0)
         return self / magnitude
+
+    def dot(self, v):
+        return self.x * v.x + self.y * v.y
 
     def __mul__(self, other):
         return Vector(self.x * other, self.y * other)

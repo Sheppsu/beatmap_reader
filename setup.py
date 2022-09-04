@@ -35,8 +35,6 @@ classifiers = [
 
 packages = [
     'beatmap_reader',
-    'beatmap_reader.performance_calculation',
-    'beatmap_reader.performance_calculation.osu',
 ]
 
 setuptools.setup(

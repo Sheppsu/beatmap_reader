@@ -2,7 +2,6 @@ from .read import SongsReader, BeatmapsetReader, BeatmapReader
 from .util import search_for_songs_folder, get_sample_set
 from .enums import *
 from .hit_objects import HitObject
-from .calculator import BeatmapCalculator
 from typing import Sequence, Union
 import os
 import traceback
@@ -95,12 +94,15 @@ class Events:
 
 
 class Effects:
+    __slots__ = ("is_kiai_enabled", "is_first_barline_omitted")
+
     def __init__(self, effects):
         self.is_kiai_enabled = bool(effects & (1 << 0))
         self.is_first_barline_omitted = bool(effects & (1 << 3))
 
 
 class UninheritedTimingPoint:
+    __slots__ = ("time", "beat_duration", "meter", "sample_set", "sample_index", "volume", "effects")
     type = TimingPointType.UNINHERITED
 
     def __init__(self, time, beat_duration, meter, sample_set,
@@ -115,6 +117,7 @@ class UninheritedTimingPoint:
 
 
 class InheritedTimingPoint:
+    __slots__ = ("time", "slider_velocity", "sample_set", "sample_index", "volume", "effects")
     type = TimingPointType.INHERITED
 
     def __init__(self, time, slider_velocity, sample_set,
@@ -147,6 +150,8 @@ class TimingPoint:
 
 
 class Colour:
+    __slots__ = ("int_colour",)
+
     def __init__(self, colour):
         self.int_colour = colour
 
@@ -183,6 +188,8 @@ class Colour:
 
 
 class Colours:
+    __slots__ = ("combo_colours", "slider_track_override", "slider_border")
+
     def __init__(self, data):
         self.combo_colours = {}
         for combo, colour in data.items():
@@ -195,6 +202,10 @@ class Colours:
 
 
 class Beatmap:
+    __slots__ = (
+        "reader", "version", "general", "editor", "metadata", "difficulty",
+        "events", "timing_points", "colours", "hit_objects", "fully_loaded"
+    )
     STACK_DISTANCE = 3
 
     def __init__(self, reader: BeatmapReader):
@@ -209,7 +220,6 @@ class Beatmap:
         self.colours: Union[Colours, dict, None] = None
         self.hit_objects: Union[Sequence[HitObject], dict, None] = None
 
-        self.difficulty_calculator = None
         self.fully_loaded = False
 
     def load(self):
@@ -229,13 +239,6 @@ class Beatmap:
         self.hit_objects = data.get("HitObjects")
         try:
             self._format_data()
-            if self.version >= 6:
-                self._apply_stacking(0, len(self.hit_objects)-1)
-            else:
-                self._apply_stacking_old()
-            self._format_sliders()
-            self.fully_loaded = True
-            self.difficulty_calculator = BeatmapCalculator(self)
             return True
         except:
             print(f"There was a problem while formatting the data in {self.reader.path}\n{traceback.format_exc()}")
@@ -250,10 +253,12 @@ class Beatmap:
         self.colours = Colours(self.colours) if self.colours is not None else None
         self.hit_objects = list(map(lambda data: HitObject(self, data), self.hit_objects)) if self.hit_objects is not None else None
 
-    def get_difficulty_attributes(self, mods=None):
-        if not self.fully_loaded:
-            raise Exception("Beatmap must be loaded to get difficulty attributes")
-        return self.difficulty_calculator.get_difficulty_attributes(mods)
+        if self.version >= 6:
+            self._apply_stacking(0, len(self.hit_objects) - 1)
+        else:
+            self._apply_stacking_old()
+        self._format_sliders()
+        self.fully_loaded = True
 
     def _format_sliders(self):
         for hit_obj in self.hit_objects:
@@ -382,6 +387,8 @@ class Beatmap:
 
 
 class Beatmapset:
+    __slots__ = ("reader",)
+
     def __init__(self, reader: BeatmapsetReader):
         self.reader = reader
         self.reader.discover_beatmaps()
@@ -400,6 +407,8 @@ class Beatmapset:
 
 
 class SongsFolder:
+    __slots__ = ("reader",)
+
     def __init__(self, reader: SongsReader):
         self.reader = reader
         self.reader.discover_all_beatmapsets()

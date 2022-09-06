@@ -1,3 +1,1 @@
-WARNING: difficulty calculation is currently not working.
-
-I plan on doing a lot with this library such as adding some pp calc. Once I've finished implementing everything I'll make sure to clean it up a bit and release it on PyPi.
+I plan to do a decent bit with this library. Once I've finished implementing everything I'll make sure to clean it up a bit and release it on PyPi.

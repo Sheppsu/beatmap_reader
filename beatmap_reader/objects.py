@@ -405,6 +405,9 @@ class Beatmapset:
     def beatmaps(self) -> Sequence[Beatmap]:
         return self.reader.beatmaps
 
+    def __getitem__(self, index):
+        return self.beatmaps[index]
+
     def __iter__(self):
         return iter(self.beatmaps)
 
@@ -435,6 +438,9 @@ class SongsFolder:
     @property
     def path(self):
         return self.reader.path
+
+    def __getitem__(self, index):
+        return self.beatmapsets[index]
 
     def __iter__(self):
         return iter(self.beatmapsets)

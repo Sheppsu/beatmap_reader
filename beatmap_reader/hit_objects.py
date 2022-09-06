@@ -1,6 +1,6 @@
 from .enums import HitObjectType, TimingPointType
 from .curve import Curve, Point
-from .performance_calculation.util import Util
+from .util import difficulty_range
 from collections import namedtuple
 import pygame
 import traceback
@@ -52,7 +52,7 @@ class HitObjectBase:
         self.hit_sound = hit_sound
         self.hit_sample = hit_sample
 
-        self.time_preempt = Util.difficulty_range(parent.difficulty.approach_rate, 1800, 1200, self.PREEMPT_MIN)
+        self.time_preempt = difficulty_range(parent.difficulty.approach_rate, 1800, 1200, self.PREEMPT_MIN)
         self.scale = (1.0 - 0.7 * (parent.difficulty.circle_size - 5) / 5) / 2
         self.radius = self.OBJECT_RADIUS * self.scale
         self.stack_height = None

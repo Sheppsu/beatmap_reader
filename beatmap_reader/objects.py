@@ -228,6 +228,9 @@ class Beatmap:
         except:
             print(f"There was a problem while loading the data in {self.reader.path}\n{traceback.format_exc()}")
             return False
+        if 'version' not in data:
+            print(f"There was a problem while trying to identify the version of {self.reader.path}")
+            return False
         self.version = data["version"]
         self.general = data.get("General")
         self.editor = data.get("Editor")

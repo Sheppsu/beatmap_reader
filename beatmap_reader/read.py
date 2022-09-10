@@ -49,9 +49,10 @@ class BeatmapReader:
             current_section = None
             for line in f.readlines():
                 line = line[:-1]
+                ascii_line = "".join(filter(lambda char: char.isascii(), line))
                 if line.strip() == "" or line.startswith("//"):
                     continue
-                if current_section is None and line.startswith("osu file format"):
+                if current_section is None and ascii_line.startswith("osu file format"):
                     data.update({"version": int(line[17:].strip())})
                     continue
                 if line.startswith("[") and line.endswith("]"):

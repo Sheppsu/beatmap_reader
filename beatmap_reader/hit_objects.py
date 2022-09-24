@@ -1,6 +1,6 @@
 from .enums import HitObjectType, TimingPointType
 from .curve import Curve, Point
-from .util import difficulty_range
+from .util import difficulty_range, linspace
 from collections import namedtuple
 import pygame
 import traceback
@@ -76,10 +76,6 @@ class HitObjectBase:
         if key == "end_position" and hasattr(self, "stack_height"):
             self._set_stack_height(self.stack_height)
 
-    @property
-    def start_time(self):
-        return self.time
-
 
 class HitCircle(HitObjectBase):
     type = HitObjectType.HITCIRCLE
@@ -113,7 +109,7 @@ class Slider(HitObjectBase):
         self.nested_objects = []
         self.span_duration = (self.end_time - self.time) / self.slides
 
-        self.end_position = Point(*self.position_at_offset(self.end_time))
+        self.end_position = Point(*self.position_at(1))
         self.lazy_end_position = None
         self.lazy_travel_distance = 0
         self.lazy_travel_time = 0
@@ -131,21 +127,42 @@ class Slider(HitObjectBase):
 
     def _calculate_end_time(self):
         s_vel = self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1
-        return round(self.time + self.ui_timing_point.beat_duration * self.length * self.slides /
-                     (self.parent.difficulty.slider_multiplier * s_vel * 100))
+        return self.time + round(self.ui_timing_point.beat_duration * self.length /
+                                 (self.parent.difficulty.slider_multiplier * s_vel * 100))
 
     def create_nested_objects(self):
         """
         To be run after stacking has been applied when hit objects are being loaded.
         """
         points = list(self.curve.curve_points)
+
+        # Make a list of tick points in overlapping_times by matching each tick time to a point time
+        increase_interval = (self.end_time - self.time) / (len(points) * self.slides)
+        tick_times = linspace(0, self.end_time - self.time, self.ui_timing_point.beat_duration)
+        point_times = linspace(0, self.end_time - self.time, increase_interval)
+        overlapping_times = []
+        tick_i = 0
+        for point_i in range(len(point_times)):
+            current_point = point_times[point_i]
+            next_point = point_times[point_i]
+            current_tick = tick_times[tick_i]
+            # If tick and point time match or point time is closest to tick time than any other point.
+            if current_point == current_tick or abs(current_tick - current_point) <= abs(current_tick - next_point):
+                overlapping_times.append(current_point)
+                tick_i += 1
+            if tick_i == len(tick_times):
+                break
+
+        counter = 0
         for s_i in range(self.slides):
             for i, point in enumerate(points):
-                is_ticks = False  # TODO: implement
                 is_reverse = True if i == len(points) - 1 and s_i < self.slides - 1 else False
+                is_ticks = True if not is_reverse and counter in overlapping_times else False
                 point = Point(point[0], point[1])
                 stacked_point = point + self.stack_offset
                 self.nested_objects.append(SliderObject(point, stacked_point, is_ticks, is_reverse))
+
+                counter += increase_interval
             points.reverse()
 
     def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
@@ -169,6 +186,8 @@ class Slider(HitObjectBase):
         return self.curve.curve_points[round(progress * (len(self.curve.curve_points) - 1))]
 
     def position_at_offset(self, offset):
+        if self.time == self.end_time:
+            return self.position_at(1)
         progress = round((offset - self.time) / (self.end_time - self.time)) * self.slides
         progress = progress - 2 * (progress // 2)
         if progress > 1:

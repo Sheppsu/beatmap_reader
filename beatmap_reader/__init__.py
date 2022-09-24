@@ -5,4 +5,4 @@ from .enums import *
 from .database import *
 
 
-__version__ = "v0.2.0"
+__version__ = "v0.2.1"

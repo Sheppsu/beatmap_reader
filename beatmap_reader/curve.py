@@ -348,9 +348,12 @@ class Curve:
         type = curve_data[0].upper()
         points = Points.from_string(curve_data[1:])
         if type == "P":
-            p0, p1, p2 = points
-            if p0.slope(p1) == p1.slope(p2):
+            if len(points) == 2:
                 type = "B"
+            else:
+                p0, p1, p2 = points
+                if p0.slope(p1) == p1.slope(p2):
+                    type = "B"
         return {
             "B": Bezier,
             "P": PerfectCircle,

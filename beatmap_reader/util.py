@@ -1,4 +1,5 @@
 import os
+import numpy as np
 from .enums import SampleSet
 
 
@@ -41,3 +42,14 @@ def difficulty_range(difficulty, min, mid, max):
     if difficulty < 5:
         return mid - (mid - min) * (5 - difficulty) / 5
     return mid
+
+
+def linspace(start, stop, interval):
+    if start > stop:
+        raise ValueError("stop must be greater than start")
+    elif start == stop:
+        return np.zeros(1)
+    array = np.zeros(int((stop - start) // interval) + 1)
+    for i in range(len(array)):
+        array[i] = interval * i
+    return array

@@ -222,6 +222,10 @@ class Beatmap:
 
         self.fully_loaded = False
 
+    @classmethod
+    def from_path(cls, path):
+        return cls(BeatmapReader(path))
+
     def load(self):
         try:
             data = self.reader.load_beatmap_data()
@@ -300,7 +304,6 @@ class Beatmap:
                     extended_end_index = stack_base_index
                     if extended_end_index == len(self.hit_objects) - 1:
                         break
-
 
         extended_start_index = start_index
 

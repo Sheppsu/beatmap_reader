@@ -84,7 +84,8 @@ class HitCircle(HitObjectBase):
         super().__init__(parent, *args)
 
 
-SliderObject = namedtuple("SliderObject", ["position", "stacked_position", "is_tick", "is_reverse"])
+SliderObject = namedtuple("SliderObject", ["position", "stacked_position", "is_tick",
+                                           "is_reverse", "is_head", "is_end"])
 
 
 class Slider(HitObjectBase):
@@ -136,47 +137,57 @@ class Slider(HitObjectBase):
         """
         points = list(self.curve.curve_points)
 
-        # Make a list of tick points in overlapping_times by matching each tick time to a point time
+        # increasing_interval to use for matching tick times
         increase_interval = (self.end_time - self.time) / (len(points) * self.slides)
-        tick_times = linspace(0, self.end_time - self.time, self.ui_timing_point.beat_duration)
-        point_times = linspace(0, self.end_time - self.time, increase_interval)
-        overlapping_times = []
-        tick_i = 0
-        for point_i in range(len(point_times)):
-            current_point = point_times[point_i]
-            next_point = point_times[point_i]
-            current_tick = tick_times[tick_i]
-            # If tick and point time match or point time is closest to tick time than any other point.
-            if current_point == current_tick or abs(current_tick - current_point) <= abs(current_tick - next_point):
-                overlapping_times.append(current_point)
-                tick_i += 1
-            if tick_i == len(tick_times):
-                break
+        # list of tick times
+        tick_times = linspace(0, self.end_time - self.time,
+                              self.ui_timing_point.beat_duration/self.parent.difficulty.slider_tick_rate)
 
+        tick_i = 1
         counter = 0
         for s_i in range(self.slides):
             for i, point in enumerate(points):
-                is_reverse = True if i == len(points) - 1 and s_i < self.slides - 1 else False
-                is_ticks = True if not is_reverse and counter in overlapping_times else False
+                is_head = i == 0 and s_i == 0
+                is_end = i == len(points) - 1 and s_i == self.slides - 1
+                is_reverse = True if i == len(points) - 1 and not is_head and not is_end else False
+                current_tick = tick_times[tick_i] if tick_i < len(tick_times) else None
+                is_ticks = False
+                # If current time matches a tick time and not slider head or reverse
+                if current_tick is not None and not is_head | is_reverse | is_end and (
+                        counter == current_tick or
+                        abs(current_tick - counter) <= abs(current_tick - (counter + increase_interval))):
+                    is_ticks = True
+                    tick_i += 1
                 point = Point(point[0], point[1])
                 stacked_point = point + self.stack_offset
-                self.nested_objects.append(SliderObject(point, stacked_point, is_ticks, is_reverse))
+                self.nested_objects.append(SliderObject(point, stacked_point, is_ticks,
+                                                        is_reverse, is_head, is_end))
 
                 counter += increase_interval
             points.reverse()
 
     def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
-               border_color=(255, 255, 255), border_thickness=1):
+               border_color=(255, 255, 255), border_thickness=1, tick_surf=None):
         # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
+        # TODO: add texture
+        format_point = lambda p1, p2: (p1 * osu_pixel_multiplier + placement_offset[0],
+                                       p2 * osu_pixel_multiplier + placement_offset[1])
         surf = pygame.Surface(screen_size)
         surf.set_colorkey((0, 0, 0))
         try:
             size = self.curve.radius_offset*osu_pixel_multiplier
+            # Create base slider body and border
             for c, r in ((border_color, size), (color, size-border_thickness)):
                 for point in self.curve.curve_points:
-                    pygame.draw.circle(surf, c, (point[0] * osu_pixel_multiplier + placement_offset[0],
-                                                 point[1] * osu_pixel_multiplier + placement_offset[1]),
+                    pygame.draw.circle(surf, c, format_point(*point),
                                        r)
+            # Create ticks
+            if tick_surf is not None:
+                tick_w, tick_h = tick_surf.get_size()
+                for nested_obj in self.nested_objects:
+                    if nested_obj.is_tick:
+                        x, y = format_point(*nested_obj.stacked_position)
+                        surf.blit(tick_surf, (x - tick_w//2, y - tick_h//2))
         except:
             print(f"Error occurred while rendering slider at {self.time} in {self.parent.path}.")
             traceback.print_exc()

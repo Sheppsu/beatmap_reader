@@ -22,7 +22,15 @@ def get_sliders():
 
     beatmapsets = list(folder.beatmapsets)
     random.shuffle(beatmapsets)
+
+    catmullmap = None
     for beatmapset in beatmapsets:
+        if beatmapset.path.endswith("3 Ni-Ni - 1,2,3,4, 007 [Wipeout Series]"):
+            catmullmap = beatmapset
+    if catmullmap is None:
+        raise Exception("catmullmap not found")
+
+    for beatmapset in [catmullmap] + beatmapsets:
         if not beatmapset.beatmaps:
             print(f"Beatmapset {beatmapset.path} has no beatmaps. This is an error with the program.")
             break
@@ -33,7 +41,8 @@ def get_sliders():
             for obj in beatmap.hit_objects:
                 if obj.type == HitObjectType.SLIDER and len(sliders[obj.curve.type]) < 5:
                     sliders[obj.curve.type].append(obj)
-                    print(f"Using {obj.curve.type} slider from {beatmap.path}")
+                    print(obj.end_time)
+                    print(f"Using {obj.curve.type.name} slider from {beatmap.path}")
                     if all(map(lambda l: len(l) == 5, sliders.values())):
                         return sliders
 
@@ -41,9 +50,11 @@ def get_sliders():
 
 
 sliders = get_sliders()
+tick = pygame.Surface((10, 10))
+tick.fill((255, 255, 255))
 for slider_list in sliders.values():
     for slider in slider_list:
-        slider.render((640, 480), (0, 0), color=(0, 255, 0), border_color=(0, 0, 255))
+        slider.render((640, 480), (64, 48), color=(0, 255, 0), border_color=(0, 0, 255), tick_surf=tick)
 
 
 pygame.init()
@@ -81,6 +92,7 @@ while True:
                     slider_indexes[slider_type] = 4
 
     screen.fill((0, 0, 0))
+    pygame.draw.rect(screen, (150, 150, 150), (64, 48, 512, 384), 3)
 
     for slider_type, i in slider_indexes.items():
         if i == -1:
@@ -89,7 +101,7 @@ while True:
         screen.blit(slider.surf, (0, 0))
         if draw_points:
             for point in slider.curve.points:
-                pygame.draw.circle(screen, (255, 0, 0), (point[0], point[1]), 2)
+                pygame.draw.circle(screen, (255, 0, 0), (point[0]+64, point[1]+48), 2)
 
     pygame.display.update()
     clock.tick(60)

@@ -5,6 +5,8 @@ import numpy as np
 
 
 class Point:
+    __slots__ = ("x", "y", "anchor_point")
+
     def __init__(self, x: float, y: float, anchor_points: bool = False):
         self.x = x
         self.y = y
@@ -70,6 +72,8 @@ class Point:
 
 
 class Vector:
+    __slots__ = ("x", "y")
+
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -92,8 +96,13 @@ class Vector:
     def __truediv__(self, other):
         return Vector(self.x / other, self.y / other)
 
+    def __str__(self):
+        return f"({self.x}, {self.y})"
+
 
 class Points:
+    __slots__ = ("points",)
+
     def __init__(self, points: list[Point]):
         offset = 0
         for i in range(len(points)-1):
@@ -138,6 +147,8 @@ class Points:
 
 
 class CurveBase:
+    __slots__ = ("points", "parent", "radius_offset", "curve_points_cache", "osu_pixel_multiplier")
+
     def __init__(self, points: Points, parent):
         self.points = points
         self.parent = parent
@@ -162,7 +173,6 @@ class Bezier(CurveBase):
     type = CurveType.BEZIER
 
     def _get_t_points(self, max_t=1):
-        # TODO: limit curve to max length
         return np.linspace(0, max_t, math.ceil(self.parent.length*self.osu_pixel_multiplier))
 
     def _save_curve_result(self, curves, max_t=1):
@@ -184,18 +194,37 @@ class Bezier(CurveBase):
         b2 = self._create_curve(points[1:])
         return lambda t: b1(t) * (1 - t) + b2(t) * t
 
+    def _limit_curve(self):
+        new_curve = [self.curve_points_cache[0]]
+        max_length = self.parent.length
+        current_length = 0
+        for i in range(len(self.curve_points_cache)-1):
+            p1 = self.curve_points_cache[i]
+            p2 = self.curve_points_cache[i+1]
+            length = p1.distance_to(p2)
+
+            if current_length + length <= max_length:
+                new_curve.append(p2)
+                if current_length + length == max_length:
+                    return np.array(new_curve)
+            else:
+                return new_curve
+
+            current_length += length
+
+        return new_curve
+
     def create_curve_functions(self):
         curves = []
         for points in self.points.split():
             curves.append(self._create_curve(points))
         self._save_curve_result(curves)
-
-    def __init__(self, points, parent):
-        super().__init__(points, parent)
+        self._limit_curve()
 
 
 class PerfectCircle(CurveBase):
     type = CurveType.PERFECT
+    __slots__ = CurveBase.__slots__ + ("radius",)
 
     def __init__(self, points, parent):
         super().__init__(points, parent)
@@ -207,7 +236,7 @@ class PerfectCircle(CurveBase):
 
     def _save_curve_result(self, curve, min_t, max_t):
         t_points = self._get_t_points(min_t, max_t)
-        self.curve_points_cache = list(map(lambda p: tuple(map(round, curve(p))), t_points))
+        self.curve_points_cache = list(map(lambda p: tuple(curve(p)), t_points))
 
     @staticmethod
     def get_when_equal_x(p0, p1):
@@ -257,9 +286,6 @@ class PerfectCircle(CurveBase):
 class Linear(CurveBase):
     type = CurveType.LINEAR
 
-    def __init__(self, points, parent):
-        super().__init__(points, parent)
-
     def _get_t_points(self, lines):
         return [np.linspace(0, 1, math.ceil(line[0].distance_to(line[1])*self.osu_pixel_multiplier)) for line in lines]
 
@@ -267,31 +293,54 @@ class Linear(CurveBase):
         t_points = self._get_t_points(lines)
         self.curve_points_cache = sum([
             list(map(
-                lambda t: tuple(round(line_func(t, lines[i]))),
+                lambda t: tuple(line_func(t, lines[i])),
                 t_points[i]
             ))
             for i in range(len(t_points))],
             []
         )
 
+    def _limit_lines(self, lines):
+        limited_lines = []
+        max_length = self.parent.length
+        current_length = 0
+        for line in lines:
+            line_length = line[0].distance_to(line[1])
+
+            if current_length + line_length <= max_length:
+                limited_lines.append(line)
+                if current_length + line_length == max_length:
+                    return limited_lines
+            else:
+                length_left = max_length - current_length
+                line_angle = (line[1] - line[0]).v().normalize()
+                new_line = (line[0], line[0] + line_angle * length_left)
+                limited_lines.append(new_line)
+                return limited_lines
+
+            current_length += line_length
+
+        return limited_lines
+
     def create_curve_functions(self):
         # TODO: limit curve to max length
+        # format = lambda lines: list(map(lambda t: (str(t[0]), str(t[1])), lines))
         lines = [(self.points[i], self.points[i + 1]) for i in range(len(self.points) - 1)]
+        # print(f"{format(lines)} -> ", end="")
+        lines = self._limit_lines(lines)
+        # print(format(lines))
         self._save_curve_result((lambda t, line: line[0]*(1-t) + line[1]*t), lines)
 
 
 class CatMull(CurveBase):
     type = CurveType.CATMULL
 
-    def __init__(self, points, parent):
-        super().__init__(points, parent)
-
-    def _get_t_points(self, max_t=1):
+    def _get_t_points(self):
         # TODO: limit curve to max length
-        return np.linspace(0, max_t, math.ceil(self.parent.length*self.osu_pixel_multiplier))
+        return np.linspace(0, 1, math.ceil(self.parent.length*self.osu_pixel_multiplier))
 
-    def _save_curve_result(self, curves, max_t=1):
-        t_points = self._get_t_points(max_t)
+    def _save_curve_result(self, curves):
+        t_points = self._get_t_points()
         self.curve_points_cache = sum([
             list(map(
                 curve,
@@ -317,17 +366,17 @@ class CatMull(CurveBase):
         def catmull(t):
             t2 = t * t
             t3 = t2 * t
-            return round(0.5 *
-                         (2 * p1.x +
-                          (-p0.x + p2.x) * t +
-                          (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-                          (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
-                         ), round(0.5 *
-                                  (2 * p1.y +
-                                   (-p0.y + p2.y) * t +
-                                   (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-                                   (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
-                                  )
+            return (0.5 *
+                    (2 * p1.x +
+                     (-p0.x + p2.x) * t +
+                     (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+                     (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3)
+                    ), (0.5 *
+                        (2 * p1.y +
+                         (-p0.y + p2.y) * t +
+                         (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+                         (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+                        )
         return catmull
 
     def create_curve_functions(self):

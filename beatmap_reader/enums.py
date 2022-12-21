@@ -46,3 +46,11 @@ class CurveType(IntEnum):
 class TimingPointType(IntEnum):
     UNINHERITED = 0
     INHERITED = 1
+
+
+class SliderEventType(IntEnum):
+    TICK = 0
+    LEGACY_LAST_TICK = 1
+    HEAD = 2
+    TAIL = 3
+    REPEAT = 4

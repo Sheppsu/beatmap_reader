@@ -1,4 +1,4 @@
-from beatmap_reader import SongsFolder, HitObjectType, CurveType
+from beatmap_reader import SongsFolder, HitObjectType, CurveType, SliderEventType
 import pygame
 import random
 
@@ -50,16 +50,17 @@ def get_sliders():
 
 
 sliders = get_sliders()
-tick = pygame.Surface((10, 10))
-tick.fill((255, 255, 255))
 for slider_list in sliders.values():
     for slider in slider_list:
-        slider.render((640, 480), (64, 48), color=(0, 255, 0), border_color=(0, 0, 255), tick_surf=tick)
+        slider.render((640, 480), (64, 48), color=(0, 255, 0), border_color=(0, 0, 255))
 
 
 pygame.init()
 screen = pygame.display.set_mode((640, 480))
 clock = pygame.time.Clock()
+
+tick = pygame.Surface((10, 10))
+tick.fill((255, 255, 255))
 
 draw_points = True
 slider_indexes = {
@@ -99,6 +100,10 @@ while True:
             continue
         slider = sliders[slider_type][i]
         screen.blit(slider.surf, (0, 0))
+        for slider_obj in slider.nested_objects:
+            if slider_obj.type == SliderEventType.TICK:
+                pos = round(slider_obj.stacked_position)
+                screen.blit(tick, (pos[0]+64, pos[1]+48))
         if draw_points:
             for point in slider.curve.points:
                 pygame.draw.circle(screen, (255, 0, 0), (point[0]+64, point[1]+48), 2)

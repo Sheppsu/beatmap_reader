@@ -53,3 +53,7 @@ def linspace(start, stop, interval):
     for i in range(len(array)):
         array[i] = interval * i
     return array
+
+
+def clamp(num, bottom, top):
+    return min(top, max(bottom, num))

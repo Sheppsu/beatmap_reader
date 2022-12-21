@@ -77,16 +77,36 @@ class Metadata:
 class Difficulty:
     __slots__ = (
         "hp_drain_rate", "circle_size", "overall_difficulty",
-        "approach_rate", "slider_multiplier", "slider_tick_rate"
+        "approach_rate", "slider_multiplier", "slider_tick_rate",
+        "_hp_drain_rate", "_circle_size", "_overall_difficulty",
+        "_approach_rate"
     )
 
     def __init__(self, data):
-        self.hp_drain_rate = float(data["HPDrainRate"])
-        self.circle_size = float(data["CircleSize"])
-        self.overall_difficulty = float(data["OverallDifficulty"])
-        self.approach_rate = float(data.get("ApproachRate", self.overall_difficulty))
+        self._hp_drain_rate = float(data["HPDrainRate"])
+        self.hp_drain_rate = self._hp_drain_rate
+        self._circle_size = float(data["CircleSize"])
+        self.circle_size = self._circle_size
+        self._overall_difficulty = float(data["OverallDifficulty"])
+        self.overall_difficulty = self._overall_difficulty
+        self._approach_rate = float(data.get("ApproachRate", self.overall_difficulty))
+        self.approach_rate = self._approach_rate
         self.slider_multiplier = float(data["SliderMultiplier"])
         self.slider_tick_rate = float(data["SliderTickRate"])
+
+    def apply_mods(self, mods: Mods):
+        if Mods.HardRock in mods:
+            self.hp_drain_rate = min(self._hp_drain_rate * 1.4, 10)
+            self.circle_size = min(self._circle_size * 1.3, 10)
+            self.overall_difficulty = min(self._overall_difficulty * 1.4, 10)
+            self.approach_rate = min(self._approach_rate * 1.4, 10)
+        elif Mods.Easy in mods:
+            self.hp_drain_rate = max(self._hp_drain_rate * 0.5, 0)
+            self.circle_size = max(self._circle_size * 0.5, 10)
+            self.overall_difficulty = max(self._overall_difficulty * 0.5, 0)
+            self.approach_rate = max(self._approach_rate * 0.5, 0)
+        # TODO: DT and HT
+
 
 
 class Events:
@@ -204,7 +224,8 @@ class Colours:
 class Beatmap:
     __slots__ = (
         "reader", "version", "general", "editor", "metadata", "difficulty",
-        "events", "timing_points", "colours", "hit_objects", "fully_loaded"
+        "events", "timing_points", "colours", "hit_objects", "fully_loaded",
+        "max_combo", "hit_circle_count", "slider_count", "spinner_count"
     )
     STACK_DISTANCE = 3
 
@@ -219,6 +240,11 @@ class Beatmap:
         self.timing_points: Union[Sequence[TimingPoint], dict, None] = None
         self.colours: Union[Colours, dict, None] = None
         self.hit_objects: Union[Sequence[HitObject], dict, None] = None
+
+        self.max_combo = None
+        self.hit_circle_count = None
+        self.slider_count = None
+        self.spinner_count = None
 
         self.fully_loaded = False
 
@@ -258,13 +284,15 @@ class Beatmap:
         self.difficulty = Difficulty(self.difficulty) if self.difficulty is not None else None
         self.timing_points = list(map(TimingPoint, self.timing_points)) if self.timing_points is not None else None
         self.colours = Colours(self.colours) if self.colours is not None else None
-        self.hit_objects = list(map(lambda data: HitObject(self, data), self.hit_objects)) if self.hit_objects is not None else None
+        self.hit_objects = list(map(lambda data: HitObject(self, data[1], data[0]), enumerate(self.hit_objects))) if self.hit_objects is not None else None
 
         if self.version >= 6:
             self._apply_stacking(0, len(self.hit_objects) - 1)
         else:
             self._apply_stacking_old()
         self._format_sliders()
+        self.max_combo = self._calculate_max_combo()
+        self.hit_circle_count, self.slider_count, self.spinner_count = self._calculate_object_amounts()
         self.fully_loaded = True
 
     def _format_sliders(self):
@@ -323,7 +351,9 @@ class Beatmap:
                     if object_n.type == HitObjectType.SPINNER:
                         continue
 
-                    if object_i.time - object_n.end_time > stack_threshold:
+                    end_time = object_n.end_time
+
+                    if object_i.time - end_time > stack_threshold:
                         break
 
                     if n < extended_start_index:
@@ -335,7 +365,7 @@ class Beatmap:
 
                         for j in range(n+1, i+1):
                             object_j = self.hit_objects[j]
-                            if object_n.position.distance_to(object_j.position) < self.STACK_DISTANCE:
+                            if object_n.end_position.distance_to(object_j.position) < self.STACK_DISTANCE:
                                 object_j.stack_height -= offset
 
                         break
@@ -344,7 +374,7 @@ class Beatmap:
                         object_n.stack_height = object_i.stack_height + 1
                         object_i = object_n
             elif object_i.type == HitObjectType.SLIDER:
-                while n-1 >= 0:
+                while n-1 >= start_index:
                     n -= 1
                     object_n = self.hit_objects[n]
                     if object_n.type == HitObjectType.SPINNER:
@@ -383,6 +413,37 @@ class Beatmap:
                     slider_stack += 1
                     self.hit_objects[j].stack_height -= slider_stack
                     start_time = self.hit_objects[j].end_time
+
+    def _calculate_max_combo(self):
+        combo = 0
+        for hit_object in self.hit_objects:
+            if hit_object.type == HitObjectType.SLIDER:
+                combo += len(hit_object.nested_objects)
+            else:
+                combo += 1
+        return combo
+
+    def _calculate_object_amounts(self):
+        hit_circles_count = 0
+        slider_count = 0
+        spinner_count = 0
+        for ho in self.hit_objects:
+            if ho.type == HitObjectType.HITCIRCLE:
+                hit_circles_count += 1
+            elif ho.type == HitObjectType.SLIDER:
+                slider_count += 1
+            elif ho.type == HitObjectType.SPINNER:
+                spinner_count += 1
+        return hit_circles_count, slider_count, spinner_count
+
+    def apply_mods(self, mods: Mods):
+        if type(self.difficulty) != Difficulty:
+            raise TypeError("difficulty attribute is not formatted properly and so mods cannot be applied to it.")
+        if len(self.hit_objects) > 0 and not all(map(lambda ho: isinstance(ho, HitObjectBase), self.hit_objects)):
+            raise TypeError("hit_objects is not formatted properly and so mods cannot be applied to it.")
+        self.difficulty.apply_mods(mods)
+        for hit_object in self.hit_objects:
+            hit_object.on_difficulty_change()
 
     @property
     def path(self):

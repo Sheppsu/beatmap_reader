@@ -1,13 +1,14 @@
-from .enums import HitObjectType, TimingPointType
+from .enums import HitObjectType, TimingPointType, SliderEventType
 from .curve import Curve, Point
-from .util import difficulty_range, linspace
+from .util import difficulty_range, linspace, clamp
+from numpy import arange
 from collections import namedtuple
 import pygame
 import traceback
 
 
 class HitObject:
-    def __new__(cls, parent, data):
+    def __new__(cls, parent, data, index):
         # TODO: hit sound and hit sample objects
         data = data.split(",")
         x, y = int(data[0]), int(data[1])
@@ -20,16 +21,16 @@ class HitObject:
         hit_sample = params.pop(-1) if params and ":" in params[-1] else None
         if type & (1 << 0):
             return HitCircle(params, parent, x, y, time, new_combo, combo_colour_skip,
-                             hit_sound, hit_sample)
+                             hit_sound, hit_sample, index)
         elif type & (1 << 1):
             return Slider(params, parent, x, y, time, new_combo, combo_colour_skip,
-                          hit_sound, hit_sample)
+                          hit_sound, hit_sample, index)
         elif type & (1 << 3):
             return Spinner(params, parent, x, y, time, new_combo, combo_colour_skip,
-                           hit_sound, hit_sample)
+                           hit_sound, hit_sample, index)
         elif type & (1 << 7):
             return ManiaHoldKey(params, parent, x, y, time, new_combo, combo_colour_skip,
-                                hit_sound, hit_sample)
+                                hit_sound, hit_sample, index)
         else:
             raise ValueError("Hit object does not have a valid type specified.")
 
@@ -37,9 +38,10 @@ class HitObject:
 class HitObjectBase:
     OBJECT_RADIUS = 64
     PREEMPT_MIN = 450
+    BASE_SCORING_DISTANCE = 100
 
     def __init__(self, parent, x, y, time, new_combo, combo_colour_skip,
-                 hit_sound, hit_sample):
+                 hit_sound, hit_sample, index):
         self.parent = parent
         self.x = x
         self.y = y
@@ -51,8 +53,10 @@ class HitObjectBase:
         self.combo_colour_skip = combo_colour_skip
         self.hit_sound = hit_sound
         self.hit_sample = hit_sample
+        self.index = index
 
         self.time_preempt = difficulty_range(parent.difficulty.approach_rate, 1800, 1200, self.PREEMPT_MIN)
+        self.time_fade_in = 400 * min(1, self.time_preempt / self.PREEMPT_MIN)
         self.scale = (1.0 - 0.7 * (parent.difficulty.circle_size - 5) / 5) / 2
         self.radius = self.OBJECT_RADIUS * self.scale
         self.stack_height = None
@@ -60,6 +64,14 @@ class HitObjectBase:
         self.stacked_position = None
         self.stacked_end_position = None
         self._set_stack_height(0)
+
+    def on_difficulty_change(self):
+        # Recalculate attributes that are based on a map's difficulty values
+        self.time_preempt = difficulty_range(self.parent.difficulty.approach_rate, 1800, 1200, self.PREEMPT_MIN)
+        self.time_fade_in = 400 * min(1, self.time_preempt / self.PREEMPT_MIN)
+        self.scale = (1.0 - 0.7 * (self.parent.difficulty.circle_size - 5) / 5) / 2
+        self.radius = self.OBJECT_RADIUS * self.scale
+        self._set_stack_height(self.stack_height)
 
     def _set_stack_height(self, stack_height):
         super().__setattr__("stack_height", stack_height)
@@ -84,12 +96,14 @@ class HitCircle(HitObjectBase):
         super().__init__(parent, *args)
 
 
-SliderObject = namedtuple("SliderObject", ["position", "stacked_position", "is_tick",
-                                           "is_reverse", "is_head", "is_end"])
+SliderObject = namedtuple("SliderObject", ["position", "stacked_position", "time", "type"])
 
 
 class Slider(HitObjectBase):
     type = HitObjectType.SLIDER
+
+    TICK_DISTANCE_MULTIPLIER = 1
+    LEGACY_LAST_TICK_OFFSET = 36
 
     def __init__(self, params, parent, *args):
         super().__init__(parent, *args)
@@ -106,15 +120,26 @@ class Slider(HitObjectBase):
         self.ui_timing_point = None
         self.i_timing_point = None
         self._set_timing_point_attributes()
-        self.end_time = self._calculate_end_time()
+
+        scoring_distance = self.BASE_SCORING_DISTANCE * self.parent.difficulty.slider_multiplier * \
+            (self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1)
+        self.velocity = scoring_distance / self.ui_timing_point.beat_duration
+        self.tick_distance = scoring_distance / self.parent.difficulty.slider_tick_rate * \
+            self.TICK_DISTANCE_MULTIPLIER
+        self.end_time = self.time + self.slides * self.length / self.velocity
         self.nested_objects = []
         self.span_duration = (self.end_time - self.time) / self.slides
 
         self.end_position = Point(*self.position_at(1))
+        # Lazy attributes are for osu difficulty calculation
         self.lazy_end_position = None
         self.lazy_travel_distance = 0
         self.lazy_travel_time = 0
         self.surf = None
+
+    def on_difficulty_change(self):
+        super().on_difficulty_change()
+        self.create_nested_objects()
 
     def _set_timing_point_attributes(self):
         for timing_point in self.parent.timing_points:
@@ -135,43 +160,53 @@ class Slider(HitObjectBase):
         """
         To be run after stacking has been applied when hit objects are being loaded.
         """
-        points = list(self.curve.curve_points)
+        self.nested_objects = []
+        events = SliderEventGenerator.generate(self.time, self.span_duration, self.velocity, self.tick_distance,
+                                               self.length, self.slides, self.LEGACY_LAST_TICK_OFFSET)
 
-        # increasing_interval to use for matching tick times
-        increase_interval = (self.end_time - self.time) / (len(points) * self.slides)
-        # list of tick times
-        tick_times = linspace(0, self.end_time - self.time,
-                              self.ui_timing_point.beat_duration/self.parent.difficulty.slider_tick_rate)
+        for event in events:
+            if event.type == SliderEventType.TICK:
+                position = self.position + self.position_at(event.path_progress)
+                self.nested_objects.append(SliderObject(position, position+self.stack_offset, event.time,
+                                                        SliderEventType.TICK))
+            elif event.type == SliderEventType.HEAD:
+                self.nested_objects.append(SliderObject(self.position, self.stacked_position, event.time,
+                                                        SliderEventType.HEAD))
+            elif event.type == SliderEventType.LEGACY_LAST_TICK:
+                self.nested_objects.append(SliderObject(self.end_position, self.stacked_end_position, event.time,
+                                                        SliderEventType.LEGACY_LAST_TICK))
+            elif event.type == SliderEventType.REPEAT:
+                position = self.position + self.position_at(event.path_progress)
+                self.nested_objects.append(SliderObject(position, position+self.stack_offset,
+                                                        self.time + (event.span_index + 1) * self.span_duration,
+                                                        SliderEventType.REPEAT))
 
-        tick_i = 1
-        counter = 0
-        for s_i in range(self.slides):
-            for i, point in enumerate(points):
-                is_head = i == 0 and s_i == 0
-                is_end = i == len(points) - 1 and s_i == self.slides - 1
-                is_reverse = True if i == len(points) - 1 and not is_head and not is_end else False
-                current_tick = tick_times[tick_i] if tick_i < len(tick_times) else None
-                is_ticks = False
-                # If current time matches a tick time and not slider head or reverse
-                if current_tick is not None and not is_head | is_reverse | is_end and (
-                        counter == current_tick or
-                        abs(current_tick - counter) <= abs(current_tick - (counter + increase_interval))):
-                    is_ticks = True
-                    tick_i += 1
-                point = Point(point[0], point[1])
-                stacked_point = point + self.stack_offset
-                self.nested_objects.append(SliderObject(point, stacked_point, is_ticks,
-                                                        is_reverse, is_head, is_end))
+    def curve_progress_at(self, progress):
+        curve_progress = progress * self.slides % 1
+        if (progress * self.slides // 1) % 2 == 1:
+            curve_progress = 1 - curve_progress
+        return curve_progress
 
-                counter += increase_interval
-            points.reverse()
+    def position_at(self, progress, stacked=True, as_point=True):
+        progress = self.curve_progress_at(progress)
+        point = self.curve.curve_points[round(progress * (len(self.curve.curve_points) - 1))]
+        if stacked:
+            point = (point[0]+self.stack_offset, point[1]+self.stack_offset)
+        if as_point:
+            point = Point(*point)
+        return point
+
+    def position_at_offset(self, offset, stacked=True, as_point=True):
+        if self.time == self.end_time:  # edge case
+            return self.position_at(1, stacked, as_point)
+        return self.position_at((offset - self.time) / (self.end_time - self.time), stacked, as_point)
 
     def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
-               border_color=(255, 255, 255), border_thickness=1, tick_surf=None):
+               border_color=(255, 255, 255), border_thickness=1):
         # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
         # TODO: add texture
-        format_point = lambda p1, p2: (p1 * osu_pixel_multiplier + placement_offset[0],
-                                       p2 * osu_pixel_multiplier + placement_offset[1])
+        format_point = lambda p1, p2: (p1 * osu_pixel_multiplier + placement_offset[0] + self.stack_offset,
+                                       p2 * osu_pixel_multiplier + placement_offset[1] + self.stack_offset)
         surf = pygame.Surface(screen_size)
         surf.set_colorkey((0, 0, 0))
         try:
@@ -181,29 +216,10 @@ class Slider(HitObjectBase):
                 for point in self.curve.curve_points:
                     pygame.draw.circle(surf, c, format_point(*point),
                                        r)
-            # Create ticks
-            if tick_surf is not None:
-                tick_w, tick_h = tick_surf.get_size()
-                for nested_obj in self.nested_objects:
-                    if nested_obj.is_tick:
-                        x, y = format_point(*nested_obj.stacked_position)
-                        surf.blit(tick_surf, (x - tick_w//2, y - tick_h//2))
         except:
             print(f"Error occurred while rendering slider at {self.time} in {self.parent.path}.")
             traceback.print_exc()
         self.surf = surf
-
-    def position_at(self, progress):
-        return self.curve.curve_points[round(progress * (len(self.curve.curve_points) - 1))]
-
-    def position_at_offset(self, offset):
-        if self.time == self.end_time:
-            return self.position_at(1)
-        progress = round((offset - self.time) / (self.end_time - self.time)) * self.slides
-        progress = progress - 2 * (progress // 2)
-        if progress > 1:
-            progress = 1 - progress
-        return self.position_at(progress)
 
 
 class Spinner(HitObjectBase):
@@ -227,3 +243,74 @@ class ManiaHoldKey(HitObjectBase):
 
     def get_column(self, total_columns):
         return self.x * total_columns // 512
+
+
+SliderEvent = namedtuple("SliderEvent", ("type", "span_index", "span_start_time",
+                                         "time", "path_progress"))
+
+
+class SliderEventGenerator:
+    @staticmethod
+    def generate(start_time, span_duration, velocity, tick_distance,
+                 total_distance, span_count, legacy_last_tick_offset):
+        events = []
+
+        max_length = 100000
+
+        length = min(max_length, total_distance)
+        tick_distance = clamp(tick_distance, 0, length)
+
+        min_distance_from_end = velocity * 10
+
+        events.append(SliderEvent(SliderEventType.HEAD, 0, start_time, start_time, 0))
+
+        if tick_distance != 0:
+            for span in range(span_count):
+                span_start_time = start_time + span * span_duration
+                is_reversed = span % 2 == 1
+
+                ticks = SliderEventGenerator.generate_ticks(span, span_start_time, span_duration, is_reversed,
+                                                            length, tick_distance, min_distance_from_end)
+                if is_reversed:
+                    ticks = reversed(ticks)
+
+                events += ticks
+
+                if span < span_count - 1:
+                    events.append(SliderEvent(SliderEventType.REPEAT, span, start_time + span * span_duration,
+                                              span_start_time + span_duration, (span + 1) % 2))
+
+        total_duration = span_count * span_duration
+
+        final_span_index = span_count - 1
+        final_span_start_time = start_time + final_span_index * span_duration
+        final_span_end_time = max(start_time + total_duration / 2, (final_span_start_time + span_duration) -
+                                  (legacy_last_tick_offset if legacy_last_tick_offset else 0))
+        final_progress = (final_span_end_time - final_span_start_time) / span_duration if span_duration != 0 else 0
+
+        if span_count % 2 == 0:
+            final_progress = 1 - final_progress
+
+        events += [
+            SliderEvent(SliderEventType.LEGACY_LAST_TICK, final_span_index, final_span_start_time,
+                        final_span_end_time, final_progress),
+            SliderEvent(SliderEventType.TAIL, final_span_index, start_time + (span_count - 1) * span_duration,
+                        start_time + total_duration, span_count % 2)
+        ]
+
+        return events
+
+    @staticmethod
+    def generate_ticks(span_index, span_start_time, span_duration, is_reversed, length,
+                       tick_distance, min_distance_from_end):
+        ticks = []
+        for d in arange(tick_distance, length+1, step=tick_distance):
+            if d >= length - min_distance_from_end:
+                break
+
+            path_progress = d / length
+            time_progress = 1 - path_progress if is_reversed else path_progress
+
+            ticks.append(SliderEvent(SliderEventType.TICK, span_index, span_start_time,
+                                     span_start_time + time_progress * span_duration, path_progress))
+        return ticks

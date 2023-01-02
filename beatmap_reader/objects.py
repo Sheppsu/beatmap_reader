@@ -1,7 +1,7 @@
 from .read import SongsReader, BeatmapsetReader, BeatmapReader
 from .util import search_for_songs_folder, get_sample_set
 from .enums import *
-from .hit_objects import HitObject
+from .hit_objects import HitObject, HitObjectBase
 from typing import Sequence, Union
 
 import os
@@ -95,15 +95,21 @@ class Difficulty:
         self.slider_multiplier = float(data["SliderMultiplier"])
         self.slider_tick_rate = float(data["SliderTickRate"])
 
+    def reset_mods(self):
+        self.hp_drain_rate = self._hp_drain_rate
+        self.circle_size = self._circle_size
+        self.overall_difficulty = self._overall_difficulty
+        self.approach_rate = self._approach_rate
+
     def apply_mods(self, mods: Mods):
         if Mods.HardRock in mods:
             self.hp_drain_rate = min(self._hp_drain_rate * 1.4, 10)
             self.circle_size = min(self._circle_size * 1.3, 10)
             self.overall_difficulty = min(self._overall_difficulty * 1.4, 10)
             self.approach_rate = min(self._approach_rate * 1.4, 10)
-        elif Mods.Easy in mods:
+        if Mods.Easy in mods:
             self.hp_drain_rate = max(self._hp_drain_rate * 0.5, 0)
-            self.circle_size = max(self._circle_size * 0.5, 10)
+            self.circle_size = max(self._circle_size * 0.5, 0)
             self.overall_difficulty = max(self._overall_difficulty * 0.5, 0)
             self.approach_rate = max(self._approach_rate * 0.5, 0)
         # TODO: DT and HT
@@ -441,6 +447,7 @@ class Beatmap:
             raise TypeError("difficulty attribute is not formatted properly and so mods cannot be applied to it.")
         if len(self.hit_objects) > 0 and not all(map(lambda ho: isinstance(ho, HitObjectBase), self.hit_objects)):
             raise TypeError("hit_objects is not formatted properly and so mods cannot be applied to it.")
+        self.difficulty.reset_mods()
         self.difficulty.apply_mods(mods)
         for hit_object in self.hit_objects:
             hit_object.on_difficulty_change()

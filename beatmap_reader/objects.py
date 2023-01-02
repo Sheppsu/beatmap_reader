@@ -3,6 +3,7 @@ from .util import search_for_songs_folder, get_sample_set
 from .enums import *
 from .hit_objects import HitObject
 from typing import Sequence, Union
+
 import os
 import traceback
 

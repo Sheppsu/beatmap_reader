@@ -104,7 +104,6 @@ class Points:
     __slots__ = ("points",)
 
     def __init__(self, points: list[Point]):
-        offset = 0
         for i in range(len(points)-1):
             if i+1 >= len(points):
                 break
@@ -234,8 +233,8 @@ class PerfectCircle(CurveBase):
     def _get_t_points(self, min_t, max_t):
         return np.linspace(min_t, max_t, math.ceil(self.parent.length*self.osu_pixel_multiplier))
 
-    def _save_curve_result(self, curve, min_t, max_t):
-        t_points = self._get_t_points(min_t, max_t)
+    def _save_curve_result(self, curve, max_t):
+        t_points = self._get_t_points(0, max_t)
         self.curve_points_cache = list(map(lambda p: tuple(curve(p)), t_points))
 
     @staticmethod
@@ -280,7 +279,7 @@ class PerfectCircle(CurveBase):
         self._save_curve_result(lambda t: (
             self.radius * math.cos((t if end_angle > mid_angle else 1-t) * 2*math.pi + offset_angle) + m_point.x,
             self.radius * math.sin((t if end_angle > mid_angle else 1-t) * 2*math.pi + offset_angle) + m_point.y
-        ), 0, (end_angle if end_angle > mid_angle else 2*math.pi - end_angle)/(2*math.pi))
+        ), self.parent.length/(self.radius*2*math.pi))
 
 
 class Linear(CurveBase):
@@ -289,7 +288,7 @@ class Linear(CurveBase):
     def _get_t_points(self, lines):
         return [np.linspace(0, 1, math.ceil(line[0].distance_to(line[1])*self.osu_pixel_multiplier)) for line in lines]
 
-    def _save_curve_result(self, line_func, lines, max_t=1):
+    def _save_curve_result(self, line_func, lines):
         t_points = self._get_t_points(lines)
         self.curve_points_cache = sum([
             list(map(
@@ -323,12 +322,8 @@ class Linear(CurveBase):
         return limited_lines
 
     def create_curve_functions(self):
-        # TODO: limit curve to max length
-        # format = lambda lines: list(map(lambda t: (str(t[0]), str(t[1])), lines))
         lines = [(self.points[i], self.points[i + 1]) for i in range(len(self.points) - 1)]
-        # print(f"{format(lines)} -> ", end="")
         lines = self._limit_lines(lines)
-        # print(format(lines))
         self._save_curve_result((lambda t, line: line[0]*(1-t) + line[1]*t), lines)
 
 

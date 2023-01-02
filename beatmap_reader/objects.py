@@ -108,7 +108,6 @@ class Difficulty:
         # TODO: DT and HT
 
 
-
 class Events:
     pass
 

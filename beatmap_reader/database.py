@@ -1,7 +1,7 @@
 import struct
 from enum import IntEnum
 from .enums import GameMode, Mods
-from typing import Union, ByteString
+from typing import Union, IO, Sequence
 
 
 class VersionChanges:
@@ -36,18 +36,15 @@ class ByteType(IntEnum):
 
 
 class Buffer:
-    def __init__(self, data):
-        self.data = data
-        self.offset = 0
+    def __init__(self, buf: IO):
+        self.buf = buf
 
     def _read(self, fmt, size):
-        data = struct.unpack(fmt, self.data[self.offset:self.offset+size])[0]
-        self.offset += size
+        data = struct.unpack(fmt, self.buf.read(size))[0]
         return data
 
     def _read_raw(self, size):
-        data = self.data[self.offset:self.offset+size]
-        self.offset += size
+        data = self.buf.read(size)
         return data
 
     def read_raw_bytes(self, size):
@@ -138,37 +135,69 @@ class Buffer:
         return bpm, offset, inherited
 
 
-class OsuCache:
-    __slots__ = ("version", "folder_count", "account_unlocked", "account_unlocked_date", "name", "beatmaps")
+class Collections:
+    __slots__ = ("version", "collections")
 
-    def __init__(self):
-        self.version = None
-        self.folder_count = None
-        self.account_unlocked = None
-        self.account_unlocked_date = None
-        self.name = None
-        self.beatmaps = []
+    def __init__(self, collection_buffer: Union[IO, Buffer]):
+        if not isinstance(collection_buffer, Buffer):
+            collection_buffer = Buffer(collection_buffer)
+
+        self.version = collection_buffer.read_uint()
+        self.collections = [Collection(collection_buffer)
+                            for _ in range(collection_buffer.read_uint())]
+
+    def replace_beatmap_hashes(self, osu_cache: Union['OsuCache', IO, Buffer]):
+        for collection in self.collections:
+            collection.replace_beatmap_hashes(osu_cache)
 
     @classmethod
-    def from_path(cls, path):
+    def from_path(cls, path: str):
         with open(path, "rb") as f:
-            return cls.from_buffer(f.read())
+            return cls(f)
 
-    @classmethod
-    def from_buffer(cls, buffer: Union[ByteString, Buffer]):
+
+class Collection:
+    __slots__ = ("name", "beatmaps")
+
+    def __init__(self, collection_buffer: Union[IO, Buffer]):
+        self.name = collection_buffer.read_string()
+        self.beatmaps: Sequence[Union[str, BeatmapCache]] = [
+            collection_buffer.read_string() for _ in range(collection_buffer.read_uint())]
+
+    def replace_beatmap_hashes(self, osu_cache: Union['OsuCache', IO, Buffer]):
+        if not isinstance(osu_cache, OsuCache):
+            if not isinstance(osu_cache, Buffer):
+                osu_cache = Buffer(osu_cache)
+            osu_cache = OsuCache(osu_cache)
+        self.beatmaps = [osu_cache.get_beatmap_from_hash(bm_hash) for bm_hash in self.beatmaps]
+
+
+class OsuCache:
+    __slots__ = (
+        "version", "folder_count", "account_unlocked", "account_unlocked_date",
+        "username", "beatmaps"
+    )
+
+    def __init__(self, buffer: Union[IO, Buffer]):
         if not isinstance(buffer, Buffer):
             buffer = Buffer(buffer)
-        cache = cls()
 
-        cache.version = buffer.read_uint()
-        cache.folder_count = buffer.read_uint()
-        cache.account_unlocked = buffer.read_bool()
-        cache.account_unlocked_date = buffer.read_date_time()
-        cache.name = buffer.read_string()
-        beatmap_count = buffer.read_uint()
-        for _ in range(beatmap_count):
-            cache.beatmaps.append(BeatmapCache.from_buffer(buffer, cache.version))
-        return cache
+        self.version = buffer.read_uint()
+        self.folder_count = buffer.read_uint()
+        self.account_unlocked = buffer.read_bool()
+        self.account_unlocked_date = buffer.read_date_time()
+        self.username = buffer.read_string()
+        self.beatmaps = [BeatmapCache(buffer, self.version) for _ in range(buffer.read_uint())]
+
+    @classmethod
+    def from_path(cls, path: str):
+        with open(path, "rb") as f:
+            return cls(f)
+
+    def get_beatmap_from_hash(self, md5_hash):
+        for beatmap in self.beatmaps:
+            if beatmap.md5_hash == md5_hash:
+                return beatmap
 
 
 class BeatmapCache:
@@ -185,82 +214,75 @@ class BeatmapCache:
         "mania_scroll_speed"
     )
 
-    def __init__(self):
-        for slot in self.__slots__:
-            setattr(self, slot, None)
-
-    @classmethod
-    def from_buffer(cls, buffer: Union[ByteString, Buffer], version):
+    def __init__(self, buffer: Union[IO, Buffer], version):
         if not isinstance(buffer, Buffer):
             buffer = Buffer(buffer)
-        cache = cls()
 
         if VersionChanges.ENTRY_LENGTH_MIN <= version < VersionChanges.ENTRY_LENGTH_MAX:
             buffer.read_uint()
-        cache.artist = buffer.read_string()
+        self.artist = buffer.read_string()
         if version >= VersionChanges.FIRST_OSZ_2:
-            cache.artist_unicode = buffer.read_string()
-        cache.title = buffer.read_string()
+            self.artist_unicode = buffer.read_string()
+        self.title = buffer.read_string()
         if version >= VersionChanges.FIRST_OSZ_2:
-            cache.title_unicode = buffer.read_string()
-        cache.mapper = buffer.read_string()
-        cache.difficulty = buffer.read_string()
-        cache.audio_file = buffer.read_string()
-        cache.md5_hash = buffer.read_string()
-        cache.map_file = buffer.read_string()
-        cache.ranked_status = buffer.read_ubyte()
-        cache.num_hitcircles = buffer.read_ushort()
-        cache.num_sliders = buffer.read_ushort()
-        cache.num_spinners = buffer.read_ushort()
-        cache.last_modified = buffer.read_date_time()
+            self.title_unicode = buffer.read_string()
+        self.mapper = buffer.read_string()
+        self.difficulty = buffer.read_string()
+        self.audio_file = buffer.read_string()
+        self.md5_hash = buffer.read_string()
+        self.map_file = buffer.read_string()
+        self.ranked_status = buffer.read_ubyte()
+        self.num_hitcircles = buffer.read_ushort()
+        self.num_sliders = buffer.read_ushort()
+        self.num_spinners = buffer.read_ushort()
+        self.last_modified = buffer.read_date_time()
         if version >= VersionChanges.FLOAT_DIFFICULTY_VALUES:
-            cache.approach_rate = buffer.read_float()
-            cache.circle_size = buffer.read_float()
-            cache.hp_drain = buffer.read_float()
-            cache.overall_difficulty = buffer.read_float()
+            self.approach_rate = buffer.read_float()
+            self.circle_size = buffer.read_float()
+            self.hp_drain = buffer.read_float()
+            self.overall_difficulty = buffer.read_float()
         else:
-            cache.approach_rate = buffer.read_ubyte()
-            cache.circle_size = buffer.read_ubyte()
-            cache.hp_drain = buffer.read_ubyte()
-            cache.overall_difficulty = buffer.read_ubyte()
-        cache.slider_velocity = buffer.read_double()
+            self.approach_rate = buffer.read_ubyte()
+            self.circle_size = buffer.read_ubyte()
+            self.hp_drain = buffer.read_ubyte()
+            self.overall_difficulty = buffer.read_ubyte()
+        self.slider_velocity = buffer.read_double()
         if version >= VersionChanges.FLOAT_DIFFICULTY_VALUES:
-            cache.diff_star_rating_standard = buffer.read_dictionary(Mods)
-            cache.diff_star_rating_taiko = buffer.read_dictionary(Mods)
-            cache.diff_star_rating_ctb = buffer.read_dictionary(Mods)
-            cache.diff_star_rating_mania = buffer.read_dictionary(Mods)
-        cache.drain_time = buffer.read_uint()
-        cache.total_time = buffer.read_uint()
-        cache.preview_time = buffer.read_uint()
-        cache.timing_points = []
+            self.diff_star_rating_standard = buffer.read_dictionary(Mods)
+            self.diff_star_rating_taiko = buffer.read_dictionary(Mods)
+            self.diff_star_rating_ctb = buffer.read_dictionary(Mods)
+            self.diff_star_rating_mania = buffer.read_dictionary(Mods)
+        self.drain_time = buffer.read_uint()
+        self.total_time = buffer.read_uint()
+        self.preview_time = buffer.read_uint()
+        self.timing_points = []
         for _ in range(buffer.read_uint()):
-            cache.timing_points.append(buffer.read_timing_point())
-        cache.beatmap_id = buffer.read_uint()
-        cache.beatmapset_id = buffer.read_uint()
-        cache.thread_id = buffer.read_uint()
-        cache.grade_standard = buffer.read_ubyte()
-        cache.grade_taiko = buffer.read_ubyte()
-        cache.grade_ctb = buffer.read_ubyte()
-        cache.grade_mania = buffer.read_ubyte()
-        cache.local_offset = buffer.read_short()
-        cache.stack_leniency = buffer.read_float()
-        cache.gameplay_mode = GameMode(buffer.read_ubyte())
-        cache.song_source = buffer.read_string()
-        cache.song_tags = buffer.read_string()
-        cache.online_offset = buffer.read_short()
-        cache.font = buffer.read_string()
-        cache.is_unplayed = buffer.read_bool()
-        cache.last_played = buffer.read_date_time()
-        cache.is_osz2 = buffer.read_bool()
-        cache.folder_name = buffer.read_string()
-        cache.last_check_against_osu_repo = buffer.read_date_time()
-        cache.ignore_beatmap_sounds = buffer.read_bool()
-        cache.ignore_beatmap_skin = buffer.read_bool()
-        cache.disable_storyboard = buffer.read_bool()
-        cache.disable_video = buffer.read_bool()
-        cache.visual_override = buffer.read_bool()
+            self.timing_points.append(buffer.read_timing_point())
+        self.beatmap_id = buffer.read_uint()
+        self.beatmapset_id = buffer.read_uint()
+        self.thread_id = buffer.read_uint()
+        self.grade_standard = buffer.read_ubyte()
+        self.grade_taiko = buffer.read_ubyte()
+        self.grade_ctb = buffer.read_ubyte()
+        self.grade_mania = buffer.read_ubyte()
+        self.local_offset = buffer.read_short()
+        self.stack_leniency = buffer.read_float()
+        self.gameplay_mode = GameMode(buffer.read_ubyte())
+        self.song_source = buffer.read_string()
+        self.song_tags = buffer.read_string()
+        self.online_offset = buffer.read_short()
+        self.font = buffer.read_string()
+        self.is_unplayed = buffer.read_bool()
+        self.last_played = buffer.read_date_time()
+        self.is_osz2 = buffer.read_bool()
+        self.folder_name = buffer.read_string()
+        self.last_check_against_osu_repo = buffer.read_date_time()
+        self.ignore_beatmap_sounds = buffer.read_bool()
+        self.ignore_beatmap_skin = buffer.read_bool()
+        self.disable_storyboard = buffer.read_bool()
+        self.disable_video = buffer.read_bool()
+        self.visual_override = buffer.read_bool()
         if version < VersionChanges.FLOAT_DIFFICULTY_VALUES:
-            cache.old_unknown1 = buffer.read_short()
-        cache.last_edit_time = buffer.read_int()
-        cache.mania_scroll_speed = buffer.read_ubyte()
-        return cache
+            self.old_unknown1 = buffer.read_short()
+        self.last_edit_time = buffer.read_int()
+        self.mania_scroll_speed = buffer.read_ubyte()

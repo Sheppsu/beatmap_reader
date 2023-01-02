@@ -1,6 +1,7 @@
 from beatmap_reader import SongsFolder, HitObjectType, CurveType, SliderEventType
 import pygame
 import random
+import traceback
 
 
 songs = "C:\\Users\\Sheep\\Desktop\\osu!\\Songs"
@@ -36,7 +37,7 @@ def get_sliders():
             break
         for beatmap in beatmapset:
             beatmap.load()
-            if beatmap.hit_objects is None:
+            if beatmap.hit_objects is None or type(beatmap.hit_objects[0]) == str:
                 continue
             for obj in beatmap.hit_objects:
                 if obj.type == HitObjectType.SLIDER and len(sliders[obj.curve.type]) < 5:
@@ -49,10 +50,29 @@ def get_sliders():
     raise Exception("Could not find a slider of each type.")
 
 
+def render(slider, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
+           border_color=(255, 255, 255), border_thickness=1):
+    format_point = lambda p1, p2: ((p1 + slider.stack_offset) * osu_pixel_multiplier + placement_offset[0],
+                                   (p2 + slider.stack_offset) * osu_pixel_multiplier + placement_offset[1])
+    surf = pygame.Surface(screen_size)
+    surf.set_colorkey((0, 0, 0))
+    try:
+        size = slider.curve.radius_offset * osu_pixel_multiplier
+        # Create base slider body and border
+        for c, r in ((border_color, size), (color, size - border_thickness)):
+            for point in slider.curve.curve_points:
+                pygame.draw.circle(surf, c, format_point(*point),
+                                   r)
+    except:
+        print(f"Error occurred while rendering slider at {slider.time} in {slider.parent.path}.")
+        traceback.print_exc()
+    slider.surf = surf
+
+
 sliders = get_sliders()
 for slider_list in sliders.values():
     for slider in slider_list:
-        slider.render((640, 480), (64, 48), color=(0, 255, 0), border_color=(0, 0, 255))
+        render(slider, (640, 480), (64, 48), color=(0, 255, 0), border_color=(0, 0, 255))
 
 
 pygame.init()
@@ -69,6 +89,8 @@ slider_indexes = {
     CurveType.CATMULL: 0,
     CurveType.LINEAR: 0,
 }
+
+
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -103,7 +125,7 @@ while True:
         for slider_obj in slider.nested_objects:
             if slider_obj.type == SliderEventType.TICK:
                 pos = round(slider_obj.stacked_position)
-                screen.blit(tick, (pos[0]+64, pos[1]+48))
+                screen.blit(tick, (pos[0]+64-5, pos[1]+48-5))
         if draw_points:
             for point in slider.curve.points:
                 pygame.draw.circle(screen, (255, 0, 0), (point[0]+64, point[1]+48), 2)

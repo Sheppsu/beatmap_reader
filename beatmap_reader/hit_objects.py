@@ -1,10 +1,8 @@
 from .enums import HitObjectType, TimingPointType, SliderEventType
 from .curve import Curve, Point
-from .util import difficulty_range, linspace, clamp
+from .util import difficulty_range, clamp
 from numpy import arange
 from collections import namedtuple
-import pygame
-import traceback
 
 
 class HitObject:
@@ -137,6 +135,9 @@ class Slider(HitObjectBase):
         self.lazy_travel_time = 0
         self.surf = None
 
+    def _set_stack_height(self, stack_height):
+        super()._set_stack_height(stack_height)
+
     def on_difficulty_change(self):
         super().on_difficulty_change()
         self.create_nested_objects()
@@ -166,7 +167,7 @@ class Slider(HitObjectBase):
 
         for event in events:
             if event.type == SliderEventType.TICK:
-                position = self.position + self.position_at(event.path_progress)
+                position = self.position_at(event.path_progress, stacked=False)
                 self.nested_objects.append(SliderObject(position, position+self.stack_offset, event.time,
                                                         SliderEventType.TICK))
             elif event.type == SliderEventType.HEAD:
@@ -176,7 +177,7 @@ class Slider(HitObjectBase):
                 self.nested_objects.append(SliderObject(self.end_position, self.stacked_end_position, event.time,
                                                         SliderEventType.LEGACY_LAST_TICK))
             elif event.type == SliderEventType.REPEAT:
-                position = self.position + self.position_at(event.path_progress)
+                position = self.position_at(event.path_progress, stacked=False)
                 self.nested_objects.append(SliderObject(position, position+self.stack_offset,
                                                         self.time + (event.span_index + 1) * self.span_duration,
                                                         SliderEventType.REPEAT))
@@ -189,7 +190,16 @@ class Slider(HitObjectBase):
 
     def position_at(self, progress, stacked=True, as_point=True):
         progress = self.curve_progress_at(progress)
-        point = self.curve.curve_points[round(progress * (len(self.curve.curve_points) - 1))]
+        index = progress * (len(self.curve.curve_points) - 1)
+        if int(index) == index:
+            point = self.curve.curve_points[int(index)]
+        else:
+            i = int(index)
+            p1 = self.curve.curve_points[i]
+            p2 = self.curve.curve_points[i+1 if i == 0 else i-1]
+            m = index - i
+            point = (p1[0]+(p2[0]-p1[0])*m, p1[1]+(p2[1]-p1[1])*m)
+
         if stacked:
             point = (point[0]+self.stack_offset, point[1]+self.stack_offset)
         if as_point:
@@ -200,26 +210,6 @@ class Slider(HitObjectBase):
         if self.time == self.end_time:  # edge case
             return self.position_at(1, stacked, as_point)
         return self.position_at((offset - self.time) / (self.end_time - self.time), stacked, as_point)
-
-    def render(self, screen_size, placement_offset, osu_pixel_multiplier=1, color=(0, 0, 0),
-               border_color=(255, 255, 255), border_thickness=1):
-        # TODO: some kind of auto coloring based on skin and beatmap combo colors etc.
-        # TODO: add texture
-        format_point = lambda p1, p2: (p1 * osu_pixel_multiplier + placement_offset[0] + self.stack_offset,
-                                       p2 * osu_pixel_multiplier + placement_offset[1] + self.stack_offset)
-        surf = pygame.Surface(screen_size)
-        surf.set_colorkey((0, 0, 0))
-        try:
-            size = self.curve.radius_offset*osu_pixel_multiplier
-            # Create base slider body and border
-            for c, r in ((border_color, size), (color, size-border_thickness)):
-                for point in self.curve.curve_points:
-                    pygame.draw.circle(surf, c, format_point(*point),
-                                       r)
-        except:
-            print(f"Error occurred while rendering slider at {self.time} in {self.parent.path}.")
-            traceback.print_exc()
-        self.surf = surf
 
 
 class Spinner(HitObjectBase):
@@ -286,7 +276,7 @@ class SliderEventGenerator:
         final_span_start_time = start_time + final_span_index * span_duration
         final_span_end_time = max(start_time + total_duration / 2, (final_span_start_time + span_duration) -
                                   (legacy_last_tick_offset if legacy_last_tick_offset else 0))
-        final_progress = (final_span_end_time - final_span_start_time) / span_duration if span_duration != 0 else 0
+        final_progress = (final_span_end_time - final_span_start_time) / span_duration
 
         if span_count % 2 == 0:
             final_progress = 1 - final_progress
@@ -308,7 +298,7 @@ class SliderEventGenerator:
             if d >= length - min_distance_from_end:
                 break
 
-            path_progress = d / length
+            path_progress = float(d / length)
             time_progress = 1 - path_progress if is_reversed else path_progress
 
             ticks.append(SliderEvent(SliderEventType.TICK, span_index, span_start_time,

@@ -35,13 +35,18 @@ classifiers = [
 
 packages = [
     'beatmap_reader',
-    'beatmap_reader.sliderpath'
 ]
 
 setuptools.setup(
     name="beatmap_reader",
     version=version,
     packages=packages,
+    ext_modules=[
+        setuptools.Extension(
+            name="sliderpath",
+            sources=["beatmap_reader/sliderpathsrc/sliderpath.c"],
+        ),
+    ],
     author="Sheepposu",
     description="Library for easily reading beatmaps",
     long_description=readme,

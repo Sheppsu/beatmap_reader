@@ -35,6 +35,7 @@ classifiers = [
 
 packages = [
     'beatmap_reader',
+    'beatmap_reader.sliderpath'
 ]
 
 setuptools.setup(

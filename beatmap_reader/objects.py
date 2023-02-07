@@ -1,7 +1,14 @@
 from .read import SongsReader, BeatmapsetReader, BeatmapReader
 from .util import search_for_songs_folder, get_sample_set
 from .enums import *
-from .hit_objects import HitObject, HitObjectBase
+from .hit_objects import (
+    HitObject,
+    HitObjectBase,
+    HitCircle,
+    Slider,
+    Spinner,
+    ManiaHoldKey
+)
 from typing import Sequence, Union
 
 import os
@@ -245,7 +252,7 @@ class Beatmap:
         self.events: Union[Events, dict, None] = None
         self.timing_points: Union[Sequence[TimingPoint], dict, None] = None
         self.colours: Union[Colours, dict, None] = None
-        self.hit_objects: Union[Sequence[HitObject], dict, None] = None
+        self.hit_objects: Union[Sequence[Union[HitCircle, Slider, Spinner, ManiaHoldKey]], dict, None] = None
 
         self.max_combo = None
         self.hit_circle_count = None
@@ -292,19 +299,20 @@ class Beatmap:
         self.colours = Colours(self.colours) if self.colours is not None else None
         self.hit_objects = list(map(lambda data: HitObject(self, data[1], data[0]), enumerate(self.hit_objects))) if self.hit_objects is not None else None
 
-        if self.version >= 6:
-            self._apply_stacking(0, len(self.hit_objects) - 1)
-        else:
-            self._apply_stacking_old()
-        self._format_sliders()
         self.max_combo = self._calculate_max_combo()
         self.hit_circle_count, self.slider_count, self.spinner_count = self._calculate_object_amounts()
         self.fully_loaded = True
 
-    def _format_sliders(self):
-        for hit_obj in self.hit_objects:
-            if hit_obj.type == HitObjectType.SLIDER:
-                hit_obj.create_nested_objects()
+    def load_sliders(self):
+        for hit_object in filter(lambda obj: obj.type == HitObjectType.SLIDER, self.hit_objects):
+            hit_object.calculate_path()
+            hit_object.create_nested_objects()
+
+    def apply_stacking(self):
+        if self.version >= 6:
+            self._apply_stacking(0, len(self.hit_objects) - 1)
+        else:
+            self._apply_stacking_old()
 
     def _apply_stacking(self, start_index, end_index):
         extended_end_index = end_index
@@ -409,7 +417,7 @@ class Beatmap:
                 if self.hit_objects[j].time - stack_threshold > start_time:
                     break
 
-                position2 = curr_hit_object.position + curr_hit_object.position_at(1) \
+                position2 = curr_hit_object.position + curr_hit_object.position_at_path_progress(1) \
                     if curr_hit_object.type == HitObjectType.SLIDER else curr_hit_object.position
 
                 if self.hit_objects[j].position.distance_to(curr_hit_object.position) < self.STACK_DISTANCE:
@@ -448,7 +456,8 @@ class Beatmap:
         if len(self.hit_objects) > 0 and not all(map(lambda ho: isinstance(ho, HitObjectBase), self.hit_objects)):
             raise TypeError("hit_objects is not formatted properly and so mods cannot be applied to it.")
         self.difficulty.reset_mods()
-        self.difficulty.apply_mods(mods)
+        if mods is not None:
+            self.difficulty.apply_mods(mods)
         for hit_object in self.hit_objects:
             hit_object.on_difficulty_change()
 

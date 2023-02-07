@@ -115,7 +115,7 @@ class Buffer:
         return self.read_raw_bytes(length).decode('utf-8')
 
     def read_date_time(self):
-        return self._read("<q", 8)
+        return self.read_long()
 
     def read_object(self):
         obj_type = ByteType(self.read_ubyte())

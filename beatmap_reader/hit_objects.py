@@ -1,5 +1,5 @@
 from .enums import HitObjectType, TimingPointType, SliderEventType
-from .curve import Curve, Point
+from .path import Vector2, SliderPath
 from .util import difficulty_range, clamp
 from numpy import arange
 from collections import namedtuple
@@ -43,7 +43,7 @@ class HitObjectBase:
         self.parent = parent
         self.x = x
         self.y = y
-        self.position = Point(x, y)
+        self.position = Vector2(x, y)
         self.end_position = self.position
         self.time = time
         self.end_time = time
@@ -75,7 +75,8 @@ class HitObjectBase:
         super().__setattr__("stack_height", stack_height)
         self.stack_offset = stack_height * self.scale * -6.4
         self.stacked_position = self.position + self.stack_offset
-        self.stacked_end_position = self.end_position + self.stack_offset
+        if self.end_position is not None:
+            self.stacked_end_position = self.end_position + self.stack_offset
 
     def __setattr__(self, key, value):
         is_updating = hasattr(self, key)
@@ -105,13 +106,13 @@ class Slider(HitObjectBase):
 
     def __init__(self, params, parent, *args):
         super().__init__(parent, *args)
-        self.curve = Curve(params[0], self)
         self.nested_objects = []
         self.slides = int(params[1])
         self.length = float(params[2])
         # TODO: yeppers
         self.edge_sounds = params[3] if len(params) > 3 else None
         self.edge_sets = params[4] if len(params) > 4 else None
+        self.path = SliderPath(params[0], self)
 
         # Calculate some slider attributes
 
@@ -128,21 +129,19 @@ class Slider(HitObjectBase):
         self.nested_objects = []
         self.span_duration = (self.end_time - self.time) / self.slides
 
-        self.end_position = Point(*self.position_at(1))
+        self.end_position = None
+
         # Lazy attributes are for osu difficulty calculation
         self.lazy_end_position = None
         self.lazy_travel_distance = 0
         self.lazy_travel_time = 0
-        self.surf = None
-
-    def _set_stack_height(self, stack_height):
-        super()._set_stack_height(stack_height)
 
     def on_difficulty_change(self):
         super().on_difficulty_change()
         self.create_nested_objects()
 
     def _set_timing_point_attributes(self):
+        # TODO: move functionality to Beatmap
         for timing_point in self.parent.timing_points:
             if timing_point.time <= self.time:
                 if timing_point.type == TimingPointType.UNINHERITED:
@@ -152,10 +151,11 @@ class Slider(HitObjectBase):
         if self.ui_timing_point is None:
             self.ui_timing_point = self.parent.timing_points[0]
 
-    def _calculate_end_time(self):
-        s_vel = self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1
-        return self.time + round(self.ui_timing_point.beat_duration * self.length /
-                                 (self.parent.difficulty.slider_multiplier * s_vel * 100))
+    def calculate_path(self):
+        self.path.calculate()
+        self.end_position = self.position_at_path_progress(1)
+        if self.stack_offset:
+            self.stacked_end_position = self.end_position + self.stack_offset
 
     def create_nested_objects(self):
         """
@@ -163,11 +163,11 @@ class Slider(HitObjectBase):
         """
         self.nested_objects = []
         events = SliderEventGenerator.generate(self.time, self.span_duration, self.velocity, self.tick_distance,
-                                               self.length, self.slides, self.LEGACY_LAST_TICK_OFFSET)
+                                               self.path.calculated_distance, self.slides, self.LEGACY_LAST_TICK_OFFSET)
 
         for event in events:
             if event.type == SliderEventType.TICK:
-                position = self.position_at(event.path_progress, stacked=False)
+                position = self.position_at_path_progress(event.path_progress, stacked=False)
                 self.nested_objects.append(SliderObject(position, position+self.stack_offset, event.time,
                                                         SliderEventType.TICK))
             elif event.type == SliderEventType.HEAD:
@@ -177,7 +177,7 @@ class Slider(HitObjectBase):
                 self.nested_objects.append(SliderObject(self.end_position, self.stacked_end_position, event.time,
                                                         SliderEventType.LEGACY_LAST_TICK))
             elif event.type == SliderEventType.REPEAT:
-                position = self.position_at(event.path_progress, stacked=False)
+                position = self.position_at_path_progress(event.path_progress, stacked=False)
                 self.nested_objects.append(SliderObject(position, position+self.stack_offset,
                                                         self.time + (event.span_index + 1) * self.span_duration,
                                                         SliderEventType.REPEAT))
@@ -188,28 +188,19 @@ class Slider(HitObjectBase):
             curve_progress = 1 - curve_progress
         return curve_progress
 
-    def position_at(self, progress, stacked=True, as_point=True):
-        progress = self.curve_progress_at(progress)
-        index = progress * (len(self.curve.curve_points) - 1)
-        if int(index) == index:
-            point = self.curve.curve_points[int(index)]
-        else:
-            i = int(index)
-            p1 = self.curve.curve_points[i]
-            p2 = self.curve.curve_points[i+1 if i == 0 else i-1]
-            m = index - i
-            point = (p1[0]+(p2[0]-p1[0])*m, p1[1]+(p2[1]-p1[1])*m)
-
+    def position_at_path_progress(self, progress, stacked=True):
+        point = self.path.position_at(progress)
         if stacked:
-            point = (point[0]+self.stack_offset, point[1]+self.stack_offset)
-        if as_point:
-            point = Point(*point)
+            point += self.stack_offset
         return point
 
-    def position_at_offset(self, offset, stacked=True, as_point=True):
+    def position_at_slider_progress(self, progress, stacked=True):
+        return self.position_at_path_progress(self.curve_progress_at(progress), stacked)
+
+    def position_at_offset(self, offset, stacked=True):
         if self.time == self.end_time:  # edge case
-            return self.position_at(1, stacked, as_point)
-        return self.position_at((offset - self.time) / (self.end_time - self.time), stacked, as_point)
+            return self.position_at_slider_progress(1, stacked)
+        return self.position_at_slider_progress((offset - self.time) / (self.end_time - self.time), stacked)
 
 
 class Spinner(HitObjectBase):
@@ -220,7 +211,7 @@ class Spinner(HitObjectBase):
         self.end_time = int(params[0])
         self.x = 256
         self.y = 192
-        self.position = Point(self.x, self.y)
+        self.position = Vector2(self.x, self.y)
 
 
 class ManiaHoldKey(HitObjectBase):

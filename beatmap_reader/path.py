@@ -1,10 +1,13 @@
 from .enums import CurveType
-from .sliderpath import (
-    approximate_bezier,
-    approximate_circular_arc,
-    approximate_catmull,
-    calculate_length
-)
+try:
+    from .sliderpath import (
+        approximate_bezier,
+        approximate_circular_arc,
+        approximate_catmull,
+        calculate_length
+    )
+except ModuleNotFoundError:
+    print("WARNING: Could not import sliderpath.pyd")
 from .util import clamp
 import math
 import numpy as np

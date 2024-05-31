@@ -5,32 +5,30 @@ from numpy import arange
 from collections import namedtuple
 
 
-class HitObject:
-    def __new__(cls, parent, data, index):
-        # TODO: hit sound and hit sample objects
-        data = data.split(",")
-        x, y = int(data[0]), int(data[1])
-        time = int(data[2])
-        type = int(data[3])
-        new_combo = bool(type & (1 << 2))
-        combo_colour_skip = 0 if not new_combo else type & 0b01110000
-        hit_sound = int(data[4]) if data[4] else None  # Got an error where the hit sound was missing :shrug:
-        params = data[5:]
-        hit_sample = params.pop(-1) if params and ":" in params[-1] else None
-        if type & (1 << 0):
-            return HitCircle(params, parent, x, y, time, new_combo, combo_colour_skip,
-                             hit_sound, hit_sample, index)
-        elif type & (1 << 1):
-            return Slider(params, parent, x, y, time, new_combo, combo_colour_skip,
-                          hit_sound, hit_sample, index)
-        elif type & (1 << 3):
-            return Spinner(params, parent, x, y, time, new_combo, combo_colour_skip,
-                           hit_sound, hit_sample, index)
-        elif type & (1 << 7):
-            return ManiaHoldKey(params, parent, x, y, time, new_combo, combo_colour_skip,
-                                hit_sound, hit_sample, index)
-        else:
-            raise ValueError("Hit object does not have a valid type specified.")
+def get_hit_object(parent, data, index):
+    data = data.split(",")
+    x, y = float(data[0]), float(data[1])
+    time = int(data[2])
+    type = int(data[3])
+    new_combo = bool(type & (1 << 2))
+    combo_colour_skip = 0 if not new_combo else type & 0b01110000
+    hit_sound = int(data[4]) if data[4] else None  # Got an error where the hit sound was missing :shrug:
+    params = data[5:]
+    hit_sample = params.pop(-1) if params and ":" in params[-1] else None
+    if type & (1 << 0):
+        return HitCircle(params, parent, x, y, time, new_combo, combo_colour_skip,
+                         hit_sound, hit_sample, index)
+    elif type & (1 << 1):
+        return Slider(params, parent, x, y, time, new_combo, combo_colour_skip,
+                      hit_sound, hit_sample, index)
+    elif type & (1 << 3):
+        return Spinner(params, parent, x, y, time, new_combo, combo_colour_skip,
+                       hit_sound, hit_sample, index)
+    elif type & (1 << 7):
+        return ManiaHoldKey(params, parent, x, y, time, new_combo, combo_colour_skip,
+                            hit_sound, hit_sample, index)
+    else:
+        raise ValueError("Hit object does not have a valid type specified.")
 
 
 class HitObjectBase:
@@ -53,6 +51,8 @@ class HitObjectBase:
         self.hit_sample = hit_sample
         self.index = index
 
+        self.ui_timing_point = None
+        self.i_timing_point = None
         self.time_preempt = difficulty_range(parent.difficulty.approach_rate, 1800, 1200, self.PREEMPT_MIN)
         self.time_fade_in = 400 * min(1, self.time_preempt / self.PREEMPT_MIN)
         self.scale = (1.0 - 0.7 * (parent.difficulty.circle_size - 5) / 5) / 2
@@ -114,22 +114,13 @@ class Slider(HitObjectBase):
         self.edge_sets = params[4] if len(params) > 4 else None
         self.path = SliderPath(params[0], self)
 
-        # Calculate some slider attributes
-
-        self.ui_timing_point = None
-        self.i_timing_point = None
-        self._set_timing_point_attributes()
-
-        scoring_distance = self.BASE_SCORING_DISTANCE * self.parent.difficulty.slider_multiplier * \
-            (self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1)
-        self.velocity = scoring_distance / self.ui_timing_point.beat_duration
-        self.tick_distance = scoring_distance / self.parent.difficulty.slider_tick_rate * \
-            self.TICK_DISTANCE_MULTIPLIER
-        self.end_time = self.time + self.slides * self.length / self.velocity
+        self.velocity = None
+        self.tick_distance = None
+        self.end_time = None
+        self.span_duration = None
         self.nested_objects = []
-        self.span_duration = (self.end_time - self.time) / self.slides
-
         self.end_position = None
+        self.tail_circle = None
 
         # Lazy attributes are for osu difficulty calculation
         self.lazy_end_position = None
@@ -140,16 +131,14 @@ class Slider(HitObjectBase):
         super().on_difficulty_change()
         self.create_nested_objects()
 
-    def _set_timing_point_attributes(self):
-        # TODO: move functionality to Beatmap
-        for timing_point in self.parent.timing_points:
-            if timing_point.time <= self.time:
-                if timing_point.type == TimingPointType.UNINHERITED:
-                    self.ui_timing_point = timing_point
-                else:
-                    self.i_timing_point = timing_point
-        if self.ui_timing_point is None:
-            self.ui_timing_point = self.parent.timing_points[0]
+    def calculate_time_attributes(self):
+        scoring_distance = self.BASE_SCORING_DISTANCE * self.parent.difficulty.slider_multiplier * \
+                           (self.i_timing_point.slider_velocity if self.i_timing_point is not None else 1)
+        self.velocity = scoring_distance / self.ui_timing_point.beat_duration
+        self.tick_distance = scoring_distance / self.parent.difficulty.slider_tick_rate * \
+            self.TICK_DISTANCE_MULTIPLIER
+        self.end_time = self.time + self.slides * self.length / self.velocity
+        self.span_duration = (self.end_time - self.time) / self.slides
 
     def calculate_path(self):
         self.path.calculate()
@@ -174,22 +163,28 @@ class Slider(HitObjectBase):
                 self.nested_objects.append(SliderObject(self.position, self.stacked_position, event.time,
                                                         SliderEventType.HEAD))
             elif event.type == SliderEventType.LEGACY_LAST_TICK:
-                self.nested_objects.append(SliderObject(self.end_position, self.stacked_end_position, event.time,
+                pos = self.position_at_path_progress(event.path_progress)
+                self.nested_objects.append(SliderObject(pos, pos+self.stack_offset, event.time,
                                                         SliderEventType.LEGACY_LAST_TICK))
             elif event.type == SliderEventType.REPEAT:
                 position = self.position_at_path_progress(event.path_progress, stacked=False)
                 self.nested_objects.append(SliderObject(position, position+self.stack_offset,
                                                         self.time + (event.span_index + 1) * self.span_duration,
                                                         SliderEventType.REPEAT))
+            elif event.type == SliderEventType.TAIL:
+                position = self.position_at_path_progress(event.path_progress, stacked=False)
+                self.tail_circle = SliderObject(position, position+self.stack_offset, event.time,
+                                                SliderEventType.TAIL)
 
     def curve_progress_at(self, progress):
+        # slides = self.slides if progress != 1 else self.slides + 1
         curve_progress = progress * self.slides % 1
         if (progress * self.slides // 1) % 2 == 1:
             curve_progress = 1 - curve_progress
         return curve_progress
 
-    def position_at_path_progress(self, progress, stacked=True):
-        point = self.path.position_at(progress)
+    def position_at_path_progress(self, progress, stacked=True, pri=False):
+        point = self.path.position_at(progress, pri)
         if stacked:
             point += self.stack_offset
         return point
@@ -285,7 +280,8 @@ class SliderEventGenerator:
     def generate_ticks(span_index, span_start_time, span_duration, is_reversed, length,
                        tick_distance, min_distance_from_end):
         ticks = []
-        for d in arange(tick_distance, length+1, step=tick_distance):
+        d = 0
+        while (d := d + tick_distance) <= length:
             if d >= length - min_distance_from_end:
                 break
 

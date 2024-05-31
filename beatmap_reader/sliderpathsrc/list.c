@@ -1,11 +1,12 @@
 #include "list.h"
+#include "Python.h"
 #include "util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 
 
-static List* list_init() {
+extern List* list_init() {
     List* l = malloc(sizeof(List));
     if (l == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Failed to create List object due to malloc failing");
@@ -15,7 +16,7 @@ static List* list_init() {
     return l;
 }
 
-static ListValue* list_create_value(void *value, size_t valueSize) {
+extern ListValue* list_create_value(void *value, size_t valueSize) {
     ListValue* listValue = malloc(sizeof(ListValue));
     if (listValue == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Failed to create ListValue object due to malloc failing");
@@ -71,7 +72,7 @@ bool _list_init_values(List *l) {
     return true;
 }
 
-static bool list_append(List *l, void *value, size_t valueSize) {
+extern bool list_append(List *l, void *value, size_t valueSize) {
     bool success = l->length == 0 ? _list_init_values(l) : _list_increment_size(l);
     if (!success) {bool_fail();}
     ListValue *lValue = list_create_value(value, valueSize);
@@ -80,7 +81,7 @@ static bool list_append(List *l, void *value, size_t valueSize) {
     return true;
 }
 
-static bool list_insert(List *l, void *value, size_t valueSize, size_t index) {
+extern bool list_insert(List *l, void *value, size_t valueSize, size_t index) {
     if (l->length == 0) {return list_append(l, value, valueSize);}
     if (!_list_increment_size(l)) {bool_fail();}
     for (size_t i=l->length-1; i>index; i--) {l->values[i] = l->values[i-1];}
@@ -116,26 +117,26 @@ bool list_checkerr(List *l, size_t index) {
     return true;
 }
 
-static void *list_get(List *l, size_t index) {
+extern void* list_get(List *l, size_t index) {
     if (!list_checkerr(l, index)) {null_fail();}
     return l->values[index]->value;
 }
 
-static bool list_set(List *l, size_t index, void *value, size_t valueSize) {
+extern bool list_set(List *l, size_t index, void *value, size_t valueSize) {
     if (!list_checkerr(l, index)) {bool_fail();}
     list_remove(l, index);
     list_insert(l, value, valueSize, index);
     return true;
 }
 
-static bool list_remove(List *l, size_t index) {
+extern bool list_remove(List *l, size_t index) {
     if (!list_checkerr(l, index)) {bool_fail();}
     free(l->values[index]->value);
     if (!_list_remove(l, index)) {bool_fail();}
     return true;
 }
 
-static void* list_pop(List *l, size_t index, size_t *sizeBuf) {
+extern void* list_pop(List *l, size_t index, size_t *sizeBuf) {
     if (!list_checkerr(l, index)) {null_fail();}
     if (sizeBuf != NULL) {*sizeBuf = l->values[index]->size;}
     void *value = l->values[index]->value;
@@ -143,7 +144,7 @@ static void* list_pop(List *l, size_t index, size_t *sizeBuf) {
     return value;
 }
 
-static void list_free(List *l) {
+extern void list_free(List *l) {
     for (size_t i=0; i<l->length; i++) {
         free(l->values[i]->value);
         free(l->values[i]);
@@ -153,7 +154,7 @@ static void list_free(List *l) {
 }
 
 
-static EfficientList *efflist_init(size_t length, size_t valueSize) {
+extern EfficientList* efflist_init(size_t length, size_t valueSize) {
     EfficientList *list = malloc(sizeof(EfficientList));
     if (list == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Failed to create an EfficientList object due to malloc failing");
@@ -169,12 +170,12 @@ static EfficientList *efflist_init(size_t length, size_t valueSize) {
     return list;
 }
 
-static void efflist_free(EfficientList *list) {
+extern void efflist_free(EfficientList *list) {
     free(list->values);
     free(list);
 }
 
-static bool efflist_checkerr(EfficientList *list, size_t index) {
+extern bool efflist_checkerr(EfficientList *list, size_t index) {
     if (index < 0 || index >= list->length) {
         char error[200];
         sprintf(error, "Attempted to performed index-specific operation on efficient list with \
@@ -185,14 +186,14 @@ static bool efflist_checkerr(EfficientList *list, size_t index) {
     return true;
 }
 
-static void *efflist_get(EfficientList *list, size_t index) {
+extern void* efflist_get(EfficientList *list, size_t index) {
     if (!efflist_checkerr(list, index)) {null_fail();}
     void *ptr = list->values;
     ptr = (char*)ptr + list->itemSize*index;
     return ptr;
 }
 
-static bool efflist_set(EfficientList *list, size_t index, void * value) {
+extern bool efflist_set(EfficientList *list, size_t index, void *value) {
     if (!efflist_checkerr(list, index)) {bool_fail();}
     void *ptr = list->values;
     ptr = (char*)ptr + list->itemSize*index;
@@ -200,6 +201,6 @@ static bool efflist_set(EfficientList *list, size_t index, void * value) {
     return true;
 }
 
-static bool efflist_contains_address(EfficientList *list, void *ptr) {
+extern bool efflist_contains_address(EfficientList *list, void *ptr) {
     return (ptr >= list->values && (char*)ptr < (char*)list->values + list->length*list->itemSize);
 }

@@ -4,7 +4,7 @@ import random
 import traceback
 
 
-songs = "C:\\Users\\Sheep\\Desktop\\osu!\\Songs"
+songs = "C:\\Users\\Sheeppsu\\Desktop\\osu!\\Songs"
 
 
 folder = SongsFolder.from_path(songs)
@@ -44,8 +44,7 @@ def get_sliders():
                 if obj.type == HitObjectType.SLIDER and len(sliders[obj.path.type]) < 5:
                     sliders[obj.path.type].append(obj)
                     print(f"Using {obj.path.type.name} slider ({obj.time}) from {beatmap.path}")
-                    beatmap.load_sliders()
-                    beatmap.apply_stacking()
+                    beatmap.load_objects()
                     if all(map(lambda l: len(l) == 5, sliders.values())):
                         return sliders
 

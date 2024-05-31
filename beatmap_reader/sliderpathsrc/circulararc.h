@@ -11,11 +11,11 @@ typedef struct {
     double thetaStart;
     double thetaRange;
     double direction;
-    double radius;
+    float radius;
     Vector2 *center;
 } CircularArcProperties;
 
-static CircularArcProperties *carcprop_init(EfficientList *vPoints);
-static void carcprop_free(CircularArcProperties *carc);
+extern CircularArcProperties *carcprop_init(EfficientList *vPoints);
+extern void carcprop_free(CircularArcProperties *carc);
 
 #endif /* ~CIRCULARARC_H */

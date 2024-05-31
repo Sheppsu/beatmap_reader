@@ -1,16 +1,17 @@
 #include "circulararc.h"
+#include "Python.h"
 #include "vector.h"
 #include "util.h"
+#include "constants.h"
 #define _USE_MATH_DEFINES
 #include <math.h>
 
 
-static CircularArcProperties *carcprop_init(EfficientList *vPoints) {
+extern CircularArcProperties *carcprop_init(EfficientList *vPoints) {
     CircularArcProperties *carc = malloc(sizeof(CircularArcProperties));
     if (carc == NULL) {
-        PyErr_SetString(PyExc_MemoryError, "Failed to create CircularArcProperties object \
-            due to malloc failing");
-        null_fail();
+        PyErr_SetString(PyExc_MemoryError, "Failed to create CircularArcProperties object due to malloc failing");
+		null_fail();
     }
 
     Vector2 *a = efflist_get(vPoints, 0);
@@ -18,7 +19,7 @@ static CircularArcProperties *carcprop_init(EfficientList *vPoints) {
     Vector2 *c = efflist_get(vPoints, 2);
     if (a == NULL || b == NULL || c == NULL) {null_fail();}
 
-    if ((b->y - a->y) * (c->x - a->x) - (b->x - a->x) * (c->y - a->y) == 0) {
+    if (fabs((b->y - a->y) * (c->x - a->x) - (b->x - a->x) * (c->y - a->y)) <= (double)DOUBLE_EPSILON) {
         carc->isValid = false;
         return carc;
     }
@@ -46,7 +47,7 @@ static CircularArcProperties *carcprop_init(EfficientList *vPoints) {
     );
     if (dA == NULL || dC == NULL) {null_fail();}
     
-    carc->radius = vector2_magnitude(dA);
+    carc->radius = (float)vector2_magnitude(dA);
     carc->thetaStart = atan2(dA->y, dA->x);
     double thetaEnd = atan2(dC->y, dC->x);
     while (thetaEnd < carc->thetaStart)  thetaEnd += 2 * M_PI;
@@ -78,7 +79,7 @@ static CircularArcProperties *carcprop_init(EfficientList *vPoints) {
     return carc;
 }
 
-static void carcprop_free(CircularArcProperties *carc) {
+extern void carcprop_free(CircularArcProperties *carc) {
     free(carc->center);
     free(carc);
 }

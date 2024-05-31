@@ -88,8 +88,7 @@ class Points(list):
             if i + 1 >= len(points):
                 break
             if points[i] == points[i + 1]:
-                if i > 1:
-                    points[i].anchor_point = True
+                points[i].anchor_point = True
                 points.pop(i + 1)
         super().__init__(points)
 
@@ -108,26 +107,26 @@ class Points(list):
         return cls(
             list(map(
                 lambda string: Point(tuple(map(
-                    int, string.split(":")
+                    float, string.split(":")
                 ))),
                 strings
             )))
 
 
 def approximate_linear(points):
-    if len(points) <= 1: raise ValueError("Must have at least 2 points")
     return points
 
 
 class SliderPath:
     __slots__ = (
         "points", "expected_distance", "type", "calculated_path",
-        "cumulative_distance", "segmentEnds", "calculated"
+        "cumulative_distance", "segmentEnds", "calculated", "parent"
     )
 
     def __init__(self, curve_data, parent):
         curve_data = curve_data.split("|")
         curve_data.insert(1, f"{parent.x}:{parent.y}")
+        self.parent = parent
         self.points = Points.from_string(curve_data[1:])
         self.expected_distance = parent.length
         self.type = CurveType(["L", "P", "B", "C"].index(curve_data[0].upper()))
@@ -147,7 +146,7 @@ class SliderPath:
 
     def calculate_subpath(self, segment):
         segment = self.get_primitive_points(segment)
-        if self.type == CurveType.PERFECT and len(self.points) != 3:
+        if self.type == CurveType.PERFECT and len(segment) != 3:
             calc_func = approximate_bezier
         else:
             calc_func = globals()[
@@ -162,16 +161,17 @@ class SliderPath:
         self.calculated_path = []
         self.segmentEnds = []
 
-        if len(self.points) == 0: return
+        if len(self.points) == 0:
+            return
 
         start = 0
         for i in range(len(self.points)):
-            if not self.points[i].anchor_point and i < len(self.points)-1:
+            if (not self.points[i].anchor_point and i != 0) and i < len(self.points)-1:
                 continue
             segment = self.points[start:i + 1]
 
             for point in self.calculate_subpath(segment):
-                if len(self.calculated_path) == 0 or self.calculated_path[-1] != point:
+                if len(self.calculated_path) == 0 or not self.compare_points(self.calculated_path[-1], point):
                     self.calculated_path.append(point)
 
             self.segmentEnds.append(len(self.calculated_path) - 1)
@@ -186,18 +186,23 @@ class SliderPath:
         low = 0
         high = len(self.cumulative_distance)-1
         i = high // 2
-        while self.cumulative_distance[i] != distance and abs(high - low) > 1:
+        while self.cumulative_distance[i] != distance and high >= low:
             if self.cumulative_distance[i] < distance:
                 low = i+1
             else:
                 high = i-1
             i = (high + low) // 2
-        return int(i)
+        return i+1
 
-    def position_at(self, progress):
+    def position_at(self, progress, pri=False):
         if len(self.calculated_path) == 0: return Vector2(0, 0)
         distance = clamp(progress, 0, 1) * self.calculated_distance
         index = self.get_approximate_distance_index(distance)
+
+        if pri: print(distance, index, self.calculated_path[index])
+
+        if index <= 0: return Vector2(*self.calculated_path[0])
+        if index >= len(self.calculated_path): return Vector2(*self.calculated_path[-1])
 
         p0 = Vector2(*self.calculated_path[index - 1])
         p1 = Vector2(*self.calculated_path[index])
@@ -206,13 +211,18 @@ class SliderPath:
 
         try:
             w = (distance - d0) / (d1 - d0)
-            return p0 + (p1 - p0) * w
+            p = p0 + (p1 - p0) * w
+            return p
         except (ZeroDivisionError, RuntimeWarning):
             return p0
 
     @property
     def calculated_distance(self):
         return 0 if len(self.cumulative_distance) == 0 else self.cumulative_distance[-1]
+
+    @staticmethod
+    def compare_points(p1, p2):
+        return round(p1[0], 5) == round(p2[0], 5) and round(p1[1], 5) == round(p2[1], 5)
 
     @staticmethod
     def get_primitive_points(points):

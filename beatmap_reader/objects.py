@@ -2,7 +2,7 @@ from .read import SongsReader, BeatmapsetReader, BeatmapReader
 from .util import search_for_songs_folder, get_sample_set
 from .enums import *
 from .hit_objects import (
-    HitObject,
+    get_hit_object,
     HitObjectBase,
     HitCircle,
     Slider,
@@ -10,7 +10,6 @@ from .hit_objects import (
     ManiaHoldKey
 )
 from typing import Sequence, Union
-
 import os
 import traceback
 
@@ -150,12 +149,13 @@ class UninheritedTimingPoint:
 
 
 class InheritedTimingPoint:
-    __slots__ = ("time", "slider_velocity", "sample_set", "sample_index", "volume", "effects")
+    __slots__ = ("time", "parent_timing_point", "slider_velocity", "sample_set", "sample_index", "volume", "effects")
     type = TimingPointType.INHERITED
 
     def __init__(self, time, slider_velocity, sample_set,
                  sample_index, volume, effects):
         self.time = time
+        self.parent_timing_point = None
         self.slider_velocity = 1/(-slider_velocity/100)
         self.sample_set = sample_set
         self.sample_index = sample_index
@@ -164,7 +164,7 @@ class InheritedTimingPoint:
 
 
 class TimingPoint:
-    def __new__(cls, string):
+    def __new__(cls, string) -> Union[InheritedTimingPoint, UninheritedTimingPoint]:
         data = string.split(",")
         time = float(data[0])
         beat_length = float(data[1])
@@ -250,7 +250,7 @@ class Beatmap:
         self.metadata: Union[Metadata, dict, None] = None
         self.difficulty: Union[Difficulty, dict, None] = None
         self.events: Union[Events, dict, None] = None
-        self.timing_points: Union[Sequence[TimingPoint], dict, None] = None
+        self.timing_points: Union[Sequence[Union[InheritedTimingPoint, UninheritedTimingPoint]], dict, None] = None
         self.colours: Union[Colours, dict, None] = None
         self.hit_objects: Union[Sequence[Union[HitCircle, Slider, Spinner, ManiaHoldKey]], dict, None] = None
 
@@ -295,18 +295,38 @@ class Beatmap:
         self.editor = Editor(self.editor) if self.editor is not None else None
         self.metadata = Metadata(self.metadata) if self.metadata is not None else None
         self.difficulty = Difficulty(self.difficulty) if self.difficulty is not None else None
-        self.timing_points = list(map(TimingPoint, self.timing_points)) if self.timing_points is not None else None
+        self.timing_points = sorted(
+            list(map(TimingPoint, self.timing_points)),
+            key=lambda timing: timing.time) \
+            if self.timing_points is not None else None
+        self._set_parent_timing_points()
         self.colours = Colours(self.colours) if self.colours is not None else None
-        self.hit_objects = list(map(lambda data: HitObject(self, data[1], data[0]), enumerate(self.hit_objects))) if self.hit_objects is not None else None
+        self.hit_objects = sorted(
+            list(map(
+                lambda data: get_hit_object(self, data[1], data[0]),
+                enumerate(self.hit_objects))),
+            key=lambda obj: obj.time) \
+            if self.hit_objects is not None else None
 
-        self.max_combo = self._calculate_max_combo()
+        self._set_timing_points()
+        for hit_object in filter(lambda obj: obj.type == HitObjectType.SLIDER, self.hit_objects):
+            hit_object.calculate_time_attributes()
         self.hit_circle_count, self.slider_count, self.spinner_count = self._calculate_object_amounts()
         self.fully_loaded = True
 
-    def load_sliders(self):
+    def load_slider_paths(self):
         for hit_object in filter(lambda obj: obj.type == HitObjectType.SLIDER, self.hit_objects):
             hit_object.calculate_path()
+
+    def load_slider_nested_objects(self):
+        for hit_object in filter(lambda obj: obj.type == HitObjectType.SLIDER, self.hit_objects):
             hit_object.create_nested_objects()
+
+    def load_objects(self):
+        self.load_slider_paths()
+        self.apply_stacking()
+        self.load_slider_nested_objects()
+        self.max_combo = self._calculate_max_combo()
 
     def apply_stacking(self):
         if self.version >= 6:
@@ -431,10 +451,7 @@ class Beatmap:
     def _calculate_max_combo(self):
         combo = 0
         for hit_object in self.hit_objects:
-            if hit_object.type == HitObjectType.SLIDER:
-                combo += len(hit_object.nested_objects)
-            else:
-                combo += 1
+            combo += len(hit_object.nested_objects) if hit_object.type == HitObjectType.SLIDER else 1
         return combo
 
     def _calculate_object_amounts(self):
@@ -449,6 +466,31 @@ class Beatmap:
             elif ho.type == HitObjectType.SPINNER:
                 spinner_count += 1
         return hit_circles_count, slider_count, spinner_count
+
+    def _set_parent_timing_points(self):
+        if self.timing_points is not None:
+            parent = None
+            for timing_point in self.timing_points:
+                if timing_point.type == TimingPointType.UNINHERITED:
+                    parent = timing_point
+                else:
+                    timing_point.parent_timing_point = parent
+
+    def _set_timing_points(self):
+        timing_i = 0
+        obj_i = 0
+        while obj_i < len(self.hit_objects):
+            offset = 0
+            while timing_i + offset < len(self.timing_points) and \
+                    self.hit_objects[obj_i].time >= self.timing_points[timing_i + offset].time:
+                offset += 1
+            timing_i = max(timing_i + offset - 1, 0)
+            if self.timing_points[timing_i].type == TimingPointType.UNINHERITED:
+                self.hit_objects[obj_i].ui_timing_point = self.timing_points[timing_i]
+            else:
+                self.hit_objects[obj_i].ui_timing_point = self.timing_points[timing_i].parent_timing_point
+                self.hit_objects[obj_i].i_timing_point = self.timing_points[timing_i]
+            obj_i += 1
 
     def apply_mods(self, mods: Mods):
         if type(self.difficulty) != Difficulty:

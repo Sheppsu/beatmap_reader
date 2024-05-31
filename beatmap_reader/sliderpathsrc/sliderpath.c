@@ -1,8 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include "Python.h"
-#include "vector.c"
-#include "list.c"
-#include "circulararc.c"
+#include "vector.h"
+#include "list.h"
+#include "circulararc.h"
 #include "constants.h"
 #include "util.h"
 #include <stdbool.h>
@@ -61,21 +61,21 @@ List *parse_points_list(PyObject *points) {
     size_t vPointsSize = PyList_Size(points);
     for (size_t i=0; i<vPointsSize; i++) {
         PyObject *point = PyList_GetItem(points, i);
-        Vector2 *v = vector2_init(
-            PyFloat_AsDouble(PyTuple_GetItem(point, 0)),
-            PyFloat_AsDouble(PyTuple_GetItem(point, 1))
-        );
-        if (v == NULL) {null_fail();}
-        if (!list_append(vPoints, v, sizeof(Vector2))) {null_fail();}
+        Vector2 v;
+        v.x = PyFloat_AsDouble(PyTuple_GetItem(point, 0));
+        v.y = PyFloat_AsDouble(PyTuple_GetItem(point, 1));
+        if (!list_append(vPoints, &v, sizeof(Vector2))) {null_fail();}
     }
 
     return vPoints;
 }
 
-EfficientList *parse_args(PyObject *args) {
+EfficientList *parse_args(PyObject *args, const char *func_name) {
     PyObject *rawPoints;
+    char fmt[100];
+    sprintf(fmt, "O:%s\0", func_name);
 
-    if (!PyArg_ParseTuple(args, "O:approximate_bezier", &rawPoints)) {
+    if (!PyArg_ParseTuple(args, fmt, &rawPoints)) {
         null_fail();
     }
 
@@ -114,7 +114,7 @@ char bezier_is_flat_enough(EfficientList *points) {
 bool bezier_subdivide(EfficientList *points, EfficientList *l, EfficientList *r, 
 EfficientList *subdivisionBuffer, size_t count) {
     size_t bufLength = subdivisionBuffer->length;
-    EfficientList *midPoints = efflist_init(bufLength, sizeof(Vector2));
+    EfficientList *midPoints = efflist_init(bufLength, subdivisionBuffer->itemSize);
     if (midPoints == NULL) {bool_fail();} 
 
     for (size_t i=0; i<max(bufLength, count); i++) {
@@ -145,11 +145,11 @@ EfficientList *subdivisionBuffer, size_t count) {
 
 bool bezier_approximate(EfficientList *points, List *output, EfficientList *subdivisionBuffer1, 
 EfficientList *subdivisionBuffer2, size_t count) {
-    EfficientList *l = efflist_init(subdivisionBuffer2->length, sizeof(Vector2));
-    EfficientList *r = efflist_init(subdivisionBuffer1->length, sizeof(Vector2));
+    EfficientList *l = efflist_init(subdivisionBuffer2->length, subdivisionBuffer2->itemSize);
+    EfficientList *r = efflist_init(subdivisionBuffer1->length,  subdivisionBuffer1->itemSize);
     if (l == NULL || r == NULL) {bool_fail();}
-    size_t bufSize1 = sizeof(Vector2)*subdivisionBuffer1->length;
-    size_t bufSize2 = sizeof(Vector2)*subdivisionBuffer2->length;
+    size_t bufSize1 = subdivisionBuffer1->itemSize*subdivisionBuffer1->length;
+    size_t bufSize2 = subdivisionBuffer2->itemSize*subdivisionBuffer2->length;
     errno_t s1 = memcpy_s(l->values, bufSize2, subdivisionBuffer2->values, bufSize2);
     errno_t s2 = memcpy_s(r->values, bufSize1, subdivisionBuffer1->values, bufSize1);
     if (s1 != 0 || s2 != 0) {
@@ -167,9 +167,7 @@ EfficientList *subdivisionBuffer2, size_t count) {
 
     Vector2 *firstPoint = efflist_get(points, 0);
     if (firstPoint == NULL) {bool_fail();}
-    Vector2 *copy = vector2_init(firstPoint->x, firstPoint->y);
-    if (copy == NULL) {bool_fail();}
-    if (!list_append(output, copy, sizeof *copy)) {bool_fail();}
+    if (!list_append(output, firstPoint, sizeof *firstPoint)) {bool_fail();}
 
     for (size_t i=1; i<count-1; ++i) {
         size_t index = 2 * i;
@@ -183,6 +181,7 @@ EfficientList *subdivisionBuffer2, size_t count) {
         );
         if (p == NULL) {bool_fail();}
         if (!list_append(output, p, sizeof *p)) {bool_fail();}
+        free(p);
     }
 
     efflist_free(l);
@@ -191,11 +190,11 @@ EfficientList *subdivisionBuffer2, size_t count) {
 }
 
 static PyObject *sliderpath_approximate_bezier(PyObject *self, PyObject *args) {
-    EfficientList *vPoints = parse_args(args);
+    EfficientList *vPoints = parse_args(args, "approximate_bezier");
     if (vPoints == NULL) {null_fail();}
     size_t nPoints = vPoints->length;
 
-    if (nPoints <= 1) {
+    if (nPoints <= 0) {
         PyErr_SetString(PyExc_ValueError, "The list given to bezier calculate has 1 or less points");
         null_fail();
     }
@@ -205,7 +204,13 @@ static PyObject *sliderpath_approximate_bezier(PyObject *self, PyObject *args) {
 
     List *toFlatten = list_init();
     if (toFlatten == NULL) {null_fail();}
-    if (!list_insert(toFlatten, vPoints, sizeof *vPoints, 0)) {null_fail();}
+
+    EfficientList *copyPoints = efflist_init(vPoints->length, vPoints->itemSize);
+    size_t size = vPoints->length*vPoints->itemSize;
+    if (memcpy_s(copyPoints->values, size, vPoints->values, size) != 0) {null_fail();}
+
+    if (!list_insert(toFlatten, copyPoints, sizeof *copyPoints, 0)) {null_fail();} 
+    free(copyPoints);
     List *freeBuffers = list_init();
     if (freeBuffers == NULL) {null_fail();}
 
@@ -225,6 +230,7 @@ static PyObject *sliderpath_approximate_bezier(PyObject *self, PyObject *args) {
                 nPoints)) {null_fail();}
 
             if (!list_insert(freeBuffers, parent, sizeof *parent, 0)) {null_fail();}
+            free(parent);
             continue;
         }
 
@@ -244,6 +250,8 @@ static PyObject *sliderpath_approximate_bezier(PyObject *self, PyObject *args) {
 
         if (!list_insert(toFlatten, rightChild, sizeof *rightChild, 0)) {null_fail();}
         if (!list_insert(toFlatten, parent, sizeof *parent, 0)) {null_fail();}
+        free(rightChild);
+        free(parent);
     }
     
     Vector2 *lastPoint = efflist_get(vPoints, nPoints-1);
@@ -281,12 +289,8 @@ Vector2 *catmull_find_point(Vector2 *v1, Vector2 *v2, Vector2 *v3, Vector2 *v4, 
 }
 
 static PyObject *sliderpath_approximate_catmull(PyObject *self, PyObject *args) {
-    EfficientList *vPoints = parse_args(args);
-    if (vPoints == NULL) {null_fail();} 
-    if (vPoints->length <= 1) {
-        PyErr_SetString(PyExc_ValueError, "The list given to bezier calculate has 1 or less points");
-        null_fail();
-    }
+    EfficientList *vPoints = parse_args(args, "approximate_catmull");
+    if (vPoints == NULL) {null_fail();}
 
     List *result = list_init();
     if (result == NULL) {null_fail();}
@@ -325,12 +329,8 @@ static PyObject *sliderpath_approximate_catmull(PyObject *self, PyObject *args) 
 
 
 static PyObject *sliderpath_approximate_circular_arc(PyObject *self, PyObject *args) {
-    EfficientList *vPoints = parse_args(args);
+    EfficientList *vPoints = parse_args(args, "approximate_circular_arc");
     if (vPoints == NULL) {null_fail();}
-    if (vPoints->length <= 1) {
-        PyErr_SetString(PyExc_ValueError, "The list given to bezier calculate has 1 or less points");
-        null_fail();
-    }
 
     CircularArcProperties *pr = carcprop_init(vPoints);
     if (pr == NULL) {null_fail();}
@@ -350,8 +350,8 @@ static PyObject *sliderpath_approximate_circular_arc(PyObject *self, PyObject *a
         double fract = (double)i / (nPoints - 1);
         double theta = pr->thetaStart + pr->direction * fract * pr->thetaRange;
         Vector2 *o = vector2_init(
-            cos(theta) * pr->radius + pr->center->x,
-            sin(theta) * pr->radius + pr->center->y
+            (float)cos(theta) * pr->radius + pr->center->x,
+            (float)sin(theta) * pr->radius + pr->center->y
         );
         if (o == NULL) {null_fail();}
         if (!list_append(output, o, sizeof *o)) {null_fail();}
@@ -451,9 +451,9 @@ static PyObject *sliderpath_calculate_length(PyObject *self, PyObject *args) {
 
         double *lastLength = list_get(cumulativeLength, cumulativeLength->length-1);
         if (lastLength == NULL) {null_fail();}
-        dir->x *= (double)(expectedDistance - *lastLength);
+        dir->x *= expectedDistance - *lastLength;
         dir->x += v2->x;
-        dir->y *= (double)(expectedDistance - *lastLength);
+        dir->y *= expectedDistance - *lastLength;
         dir->y += v2->y;
 
         if (!list_set(path, pathEndIndex, dir, sizeof *dir)) {null_fail();}

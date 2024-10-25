@@ -262,7 +262,7 @@ class SliderEventGenerator:
         final_span_start_time = start_time + final_span_index * span_duration
         final_span_end_time = max(start_time + total_duration / 2, (final_span_start_time + span_duration) -
                                   (legacy_last_tick_offset if legacy_last_tick_offset else 0))
-        final_progress = (final_span_end_time - final_span_start_time) / span_duration
+        final_progress = (final_span_end_time - final_span_start_time) / span_duration if span_duration > 0 else 1
 
         if span_count % 2 == 0:
             final_progress = 1 - final_progress

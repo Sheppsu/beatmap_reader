@@ -149,7 +149,9 @@ extern void list_free(List *l) {
         free(l->values[i]->value);
         free(l->values[i]);
     }
-    free(l->values);
+    if (l->length > 0) {
+        free(l->values);
+    }
     free(l);
 }
 
